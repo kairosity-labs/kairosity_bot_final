@@ -5,7 +5,7 @@ from .base import BaseDataMCP
 from ag_forecast.src.prompts import PERPLEXITY_SYSTEM_PROMPT
 
 class OpenRouterPerplexityMCP(BaseDataMCP):
-    def __init__(self, api_key: str = None, model: str = "perplexity/sonar-pro", **kwargs):
+    def __init__(self, api_key: str = None, model: str = "openai/gpt-4o-mini-search-preview", **kwargs):
         super().__init__(api_key, **kwargs)
         self.api_key = self.api_key or os.getenv("OPENROUTER_API_KEY")
         self.model = model

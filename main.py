@@ -67,7 +67,7 @@ class AGForecastBot(ForecastBot):
         
         # Data MCPs
         self.data_mcps = {
-            "perplexity": OpenRouterPerplexityMCP(api_key=openrouter_api_key)
+            "perplexity": OpenRouterPerplexityMCP(api_key=openrouter_api_key, model="openai/gpt-4o-mini-search-preview")
         }
         
         # Initialize Agents
