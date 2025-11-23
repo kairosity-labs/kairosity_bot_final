@@ -53,7 +53,7 @@ class FallTemplateBot2025(ForecastBot):
     Only the research and forecast functions need to be implemented in ForecastBot subclasses,
     though you may want to override other ones.
     In this example, you can change the prompts to be whatever you want since,
-    structure_output uses an LLMto intelligently reformat the output into the needed structure.
+    structure_output uses an LLM to intelligently reformat the output into the needed structure.
 
     By default (i.e. 'tournament' mode), when you run this script, it will forecast on any open questions for the
     MiniBench and Seasonal AIB tournaments. If you want to forecast on only one or the other, you can remove one
