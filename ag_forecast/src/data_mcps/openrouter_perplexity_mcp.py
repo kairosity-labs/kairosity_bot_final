@@ -41,11 +41,22 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
             
             data = response.json()
             
-            content = data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            content = message["content"]
             
-            # OpenRouter might not pass citations in the same way as direct Perplexity API.
-            # We'll check if they exist in the response, otherwise just return content.
-            citations = data.get("citations", [])
+            # Citation Parsing Logic
+            citations = []
+            
+            # 1. Check for OpenAI Search 'annotations' format
+            if "annotations" in message:
+                for annotation in message["annotations"]:
+                    if annotation.get("type") == "url_citation":
+                        cit = annotation.get("url_citation", {})
+                        citations.append(cit.get("url"))
+            
+            # 2. Check for Perplexity 'citations' format (top-level)
+            elif "citations" in data:
+                citations = data["citations"]
             
             return [{
                 "content": content,
