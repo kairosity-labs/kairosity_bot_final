@@ -5,7 +5,7 @@ from .base import BaseDataMCP
 from ag_forecast.src.prompts import PERPLEXITY_SYSTEM_PROMPT
 
 class OpenRouterPerplexityMCP(BaseDataMCP):
-    def __init__(self, api_key: str = None, model: str = "perplexity/sonar-pro", **kwargs):
+    def __init__(self, api_key: str = None, model: str = "perplexity/llama-3.1-sonar-large-128k-online", **kwargs):
         super().__init__(api_key, **kwargs)
         self.api_key = self.api_key or os.getenv("OPENROUTER_API_KEY")
         self.model = model
@@ -35,7 +35,10 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(self.base_url, json=payload, headers=headers)
-            response.raise_for_status()
+            if response.status_code != 200:
+                error_msg = f"OpenRouter Error {response.status_code}: {response.text}"
+                raise Exception(error_msg)
+            
             data = response.json()
             
             content = data["choices"][0]["message"]["content"]
