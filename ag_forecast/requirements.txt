@@ -1,0 +1,8 @@
+openai
+anthropic
+pydantic
+httpx
+pytest
+pytest-asyncio
+duckduckgo-search
+python-dotenv
