@@ -1,0 +1,31 @@
+{
+  "round": 2,
+  "query_number": 2,
+  "timestamp": "2025-11-23T17:22:38.975152",
+  "query": "2028 forecast for compute capacity concentration by organization",
+  "source": "perplexity",
+  "response": [
+    {
+      "content": "**By 2028, compute capacity is expected to become even more concentrated among the largest cloud and AI providers, with leading organizations such as Microsoft, Google, Amazon, and a few key AI labs likely holding 20\u201330% or more of total global capacity individually, while the top 4\u20135 providers could control a significant majority.** Current expert forecasts and market analyses suggest the largest single organization could hold roughly 25% of global compute capacity by the start of 2028[8].\n\nKey context and supporting details:\n\n- **Concentration metrics:** According to Metaculus forecasters\u2019 aggregation, the **highest percentage of compute capacity held by a single organization on January 1, 2028, is estimated at ~25%**[8]. This tracks with the historic and ongoing dominance by \u201chyperscalers,\u201d namely Amazon (AWS), Microsoft (Azure), Google (GCP), and potentially Meta or a leading AI lab, who already hold outsized shares of cloud and AI-optimized infrastructure.\n\n- **Cloud migration accelerating concentration:** Gartner projects that **by 2028, 70% of workloads will be running in a cloud environment, up from 25% today**[6]. This shift continues to concentrate compute capacity in the hands of a few major cloud providers, particularly as enterprise on-premises capacity declines\u2014from 10% today to roughly 5% by 2028\u2014with many enterprises migrating to public cloud or colocation[2][6].\n\n- **Role of AI and colocation:** The Boston Consulting Group expects **enterprise on-premises share to fall to 5% by 2028**. Hyperscale providers will rely on colocation and build larger facilities, further consolidating power. Colocation, often serving hyperscalers, will account for 50% of data center power demand[2], and **AI-related workloads will consume an increasing share of capacity**, meaning control by a handful of AI-first organizations is likely to deepen.\n\n- **Underlying numbers:** Global data center power demand is forecast to reach between **130 GW (BCG, 2028)** and **222 GW by 2030 (Macquarie)**, with rapid growth in regions with strong cloud and AI investment[1][2][4]. Some projections put the **US share of compute capacity as especially dominant**[8][12], thanks to continued investment and infrastructure buildup.\n\n- **AI-specific concentration:** The investment and hardware required for \u201cfrontier\u201d AI models (those at the technological cutting edge) are accessible only to the world\u2019s largest labs and cloud platforms. By 2028, forecasts suggest the number of models exceeding the highest compute thresholds (\u201cfrontier AI\u201d) will grow but still be highly centralized in organizations with immense resources[7][5][16].\n\n**Additional relevant information:**\n- Increasing energy demand, infrastructure bottlenecks, and supply chain limitations for advanced accelerators further favor scale, making it difficult for smaller organizations to compete with the largest hyperscalers and cutting-edge AI labs[3][10][16].\n- By 2028, a few organizations may operate AI training clusters in the hundreds of thousands to a million accelerator units each, underscoring continued centralization[16].\n- Policy, antitrust, and infrastructure interventions could influence future concentration, but as of current projections, the core trend points toward further compute consolidation.\n\nIn summary, **by 2028, a handful of top cloud providers and AI labs are forecasted to collectively control most of the world\u2019s high-end compute capacity, and the market share of the single largest provider may hover around 25% of total global capacity**[8][6][2].",
+      "citations": [
+        "https://www.macquarie.com/us/en/about/company/macquarie-asset-management/institutional-investor/insights/data-centres-powering-the-growth-of-ai-and-cloud-computing.html",
+        "https://www.bcg.com/publications/2025/breaking-barriers-data-center-growth",
+        "https://www.thomsonreuters.com/en-us/posts/technology/ai-impact-utility-forecasting/",
+        "https://www.goldmansachs.com/pdfs/insights/pages/generational-growth-ai-data-centers-and-the-coming-us-power-surge/report.pdf",
+        "https://epoch.ai/blog/model-counts-compute-thresholds",
+        "https://www.techrepublic.com/article/gartner-cloud-computing-future/",
+        "https://arxiv.org/html/2504.16138v1",
+        "https://www.metaculus.com/questions/38393/highest-percentage-of-compute-capacity-held-by-one-organisation-on-jan-1-2028/",
+        "https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers",
+        "https://www.csis.org/analysis/electricity-supply-bottleneck-us-ai-dominance",
+        "https://www.alphaxiv.org/overview/2504.16138v1",
+        "https://bidenwhitehouse.archives.gov/wp-content/uploads/2025/01/AI-Assessment.-Power-and-Permitting.pdf",
+        "https://www.brownadvisory.com/us/insights/data-center-balancing-act-powering-sustainable-ai-growth",
+        "https://www.spglobal.com/market-intelligence/en/news-insights/research/generative-ai-market-forecasts-revised-upward-to-52-2b-by-2028",
+        "https://www.federalreserve.gov/econres/notes/feds-notes/the-state-of-ai-competition-in-advanced-economies-20251006.html",
+        "https://ifp.org/future-of-ai-compute/"
+      ],
+      "source": "perplexity_openrouter"
+    }
+  ]
+}
