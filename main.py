@@ -167,8 +167,31 @@ class AGForecastBot(ForecastBot):
         # 3. Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
         if not predictions:
-            logger.warning("No valid predictions from community. Returning default.")
-            return ReasonedPrediction(prediction_value=0.5, reasoning="Community failed to generate predictions.")
+            logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
+            prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide a forecast probability (0-100%) and reasoning.
+                
+                Structure your response as:
+                Reasoning: ...
+                Probability: XX%
+                """
+            )
+            reasoning = await self.get_llm("default", "llm").invoke(prompt)
+            binary_prediction: BinaryPrediction = await structure_output(
+                reasoning, BinaryPrediction, model=self.get_llm("parser", "llm")
+            )
+            decimal_pred = max(0.01, min(0.99, binary_prediction.prediction_in_decimal))
+            return ReasonedPrediction(prediction_value=decimal_pred, reasoning=reasoning)
 
         aggregated_prediction = self.consensus.aggregate(predictions) # Returns a dict like {'yes': 0.75, 'no': 0.25}
         
@@ -205,12 +228,38 @@ class AGForecastBot(ForecastBot):
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
         if not predictions:
-             logger.warning("No valid predictions from community. Returning uniform distribution.")
-             uniform_prob = 1.0 / len(question.options)
+             logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
+             prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                Options: {question.options}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide probabilities for each option.
+                """
+            )
+             parsing_instructions = clean_indents(
+                f"""
+                Make sure that all option names are one of the following:
+                {question.options}
+                """
+            )
+             reasoning = await self.get_llm("default", "llm").invoke(prompt)
+             predicted_option_list: PredictedOptionList = await structure_output(
+                text_to_structure=reasoning,
+                output_type=PredictedOptionList,
+                model=self.get_llm("parser", "llm"),
+                additional_instructions=parsing_instructions,
+            )
              return ReasonedPrediction(
-                 prediction_value=PredictedOptionList([(o, uniform_prob) for o in question.options]),
-                 reasoning="Community failed to generate predictions."
-             )
+                prediction_value=predicted_option_list, reasoning=reasoning
+            )
 
         aggregated_prediction = self.consensus.aggregate(predictions) # Dict of option -> prob
         
@@ -257,10 +306,27 @@ class AGForecastBot(ForecastBot):
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
         
         if not predictions:
-             logger.warning("No valid predictions from community. Returning default.")
-             # Fallback
-             percentiles = [Percentile(value=0, percentile=0.5)] 
-             return ReasonedPrediction(prediction_value=NumericDistribution(percentiles), reasoning="Community failed.")
+             logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
+             prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide a numeric distribution (percentiles).
+                """
+            )
+             reasoning = await self.get_llm("default", "llm").invoke(prompt)
+             percentile_list: list[Percentile] = await structure_output(
+                reasoning, list[Percentile], model=self.get_llm("parser", "llm")
+            )
+             prediction = NumericDistribution.from_question(percentile_list, question)
+             return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
 
         aggregated_prediction = self.consensus.aggregate(predictions)
         
@@ -277,7 +343,27 @@ class AGForecastBot(ForecastBot):
         # Ensure we have enough data for a distribution, otherwise fallback
         if not percentiles:
              # Fallback if community fails to return valid percentiles
-             percentiles = [Percentile(value=0, percentile=0.5)] # Dummy
+             logger.warning("Community returned invalid percentiles. Falling back to legacy.")
+             prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide a numeric distribution (percentiles).
+                """
+            )
+             reasoning = await self.get_llm("default", "llm").invoke(prompt)
+             percentile_list: list[Percentile] = await structure_output(
+                reasoning, list[Percentile], model=self.get_llm("parser", "llm")
+            )
+             prediction = NumericDistribution.from_question(percentile_list, question)
+             return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
              
         prediction = NumericDistribution(percentiles) # Assuming constructor takes list of Percentile
         
