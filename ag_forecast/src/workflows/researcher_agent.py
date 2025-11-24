@@ -39,13 +39,20 @@ class ResearcherAgent:
         # Format prompt with schema if provided
         system_prompt = RESEARCHER_AGENT_SYSTEM_PROMPT.format(current_date=current_date)
         if prediction_schema:
-            schema_instruction = (
-                f"\n\nIMPORTANT: You must use the following prediction schema:\n"
-                f"Type: {prediction_schema.get('schema_type')}\n"
-                f"Options (Keys): {prediction_schema.get('options')}\n"
-                f"Description: {prediction_schema.get('description')}\n"
-                f"Your `predict()` function MUST return a dictionary with EXACTLY these keys."
-            )
+            if isinstance(prediction_schema, str):
+                schema_instruction = (
+                    f"\n\nIMPORTANT: You must use the following prediction schema:\n"
+                    f"{prediction_schema}\n"
+                    f"Your `predict()` function MUST return a dictionary matching this description."
+                )
+            else:
+                schema_instruction = (
+                    f"\n\nIMPORTANT: You must use the following prediction schema:\n"
+                    f"Type: {prediction_schema.get('schema_type')}\n"
+                    f"Options (Keys): {prediction_schema.get('options')}\n"
+                    f"Description: {prediction_schema.get('description')}\n"
+                    f"Your `predict()` function MUST return a dictionary with EXACTLY these keys."
+                )
             system_prompt += schema_instruction
             
         messages = [

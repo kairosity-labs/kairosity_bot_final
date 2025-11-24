@@ -156,12 +156,20 @@ class AGForecastBot(ForecastBot):
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # We can reuse the schema agent or just define a simple schema for binary
-        schema = "Define a function predict() -> {'yes': float, 'no': float} where 'yes' is the probability of the event occurring."
+        schema = {
+            "schema_type": "Binary (Probability)",
+            "options": ["yes", "no"],
+            "description": "Define a function predict() -> {'yes': float, 'no': float} where 'yes' is the probability of the event occurring."
+        }
         
         community_results = await self.community.run(question.question_text, research, current_date, schema)
         
         # 3. Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        if not predictions:
+            logger.warning("No valid predictions from community. Returning default.")
+            return ReasonedPrediction(prediction_value=0.5, reasoning="Community failed to generate predictions.")
+
         aggregated_prediction = self.consensus.aggregate(predictions) # Returns a dict like {'yes': 0.75, 'no': 0.25}
         
         # Extract probability
@@ -172,7 +180,7 @@ class AGForecastBot(ForecastBot):
         # We'll construct a report string from the individual forecasts to summarize
         full_report = f"Aggregated Prediction: {decimal_pred:.2%}\n\n"
         for res in community_results:
-            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            full_report += f"Agent {res.get('agent_id', '?')} Analysis:\n{res.get('analysis', 'No analysis')}\nPrediction: {res.get('prediction')}\n\n"
             
         summary = await self._summarize_report(full_report)
         
@@ -186,12 +194,24 @@ class AGForecastBot(ForecastBot):
         
         # Schema for Multiple Choice
         options_str = ", ".join(question.options)
-        schema = f"Define a function predict() -> Dict[str, float] where keys are exactly one of: [{options_str}]. Values must sum to 1."
+        schema = {
+            "schema_type": "Multiple Choice",
+            "options": question.options,
+            "description": f"Define a function predict() -> Dict[str, float] where keys are exactly one of: [{options_str}]. Values must sum to 1."
+        }
         
         community_results = await self.community.run(question.question_text, research, current_date, schema)
         
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        if not predictions:
+             logger.warning("No valid predictions from community. Returning uniform distribution.")
+             uniform_prob = 1.0 / len(question.options)
+             return ReasonedPrediction(
+                 prediction_value=PredictedOptionList([(o, uniform_prob) for o in question.options]),
+                 reasoning="Community failed to generate predictions."
+             )
+
         aggregated_prediction = self.consensus.aggregate(predictions) # Dict of option -> prob
         
         # Format for ForecastBot
@@ -210,7 +230,7 @@ class AGForecastBot(ForecastBot):
         # Summary
         full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
         for res in community_results:
-            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            full_report += f"Agent {res.get('agent_id', '?')} Analysis:\n{res.get('analysis', 'No analysis')}\nPrediction: {res.get('prediction')}\n\n"
             
         summary = await self._summarize_report(full_report)
         
@@ -225,17 +245,23 @@ class AGForecastBot(ForecastBot):
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Schema for Numeric
-        # We need a distribution. The community agents are prompted to return buckets or a distribution.
-        # For simplicity in this integration, let's ask for specific percentiles or buckets.
-        # However, ForecastBot expects a NumericDistribution.
-        # Let's ask for a dictionary of percentiles: {'p10': val, 'p25': val, 'p50': val, 'p75': val, 'p90': val}
-        
-        schema = "Define a function predict() -> {'p10': float, 'p25': float, 'p50': float, 'p75': float, 'p90': float} representing the 10th, 25th, 50th, 75th, and 90th percentiles."
+        schema = {
+            "schema_type": "Numeric Distribution",
+            "options": ["p10", "p25", "p50", "p75", "p90"],
+            "description": "Define a function predict() -> {'p10': float, 'p25': float, 'p50': float, 'p75': float, 'p90': float} representing the 10th, 25th, 50th, 75th, and 90th percentiles."
+        }
         
         community_results = await self.community.run(question.question_text, research, current_date, schema)
         
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        
+        if not predictions:
+             logger.warning("No valid predictions from community. Returning default.")
+             # Fallback
+             percentiles = [Percentile(value=0, percentile=0.5)] 
+             return ReasonedPrediction(prediction_value=NumericDistribution(percentiles), reasoning="Community failed.")
+
         aggregated_prediction = self.consensus.aggregate(predictions)
         
         # Convert to Percentile list
@@ -258,7 +284,7 @@ class AGForecastBot(ForecastBot):
         # Summary
         full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
         for res in community_results:
-            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            full_report += f"Agent {res.get('agent_id', '?')} Analysis:\n{res.get('analysis', 'No analysis')}\nPrediction: {res.get('prediction')}\n\n"
             
         summary = await self._summarize_report(full_report)
         
