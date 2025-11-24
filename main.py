@@ -132,100 +132,137 @@ class AGForecastBot(ForecastBot):
             logger.error(f"Error during research for {question.page_url}: {e}")
             return f"Error during research: {str(e)}"
 
+    async def _summarize_report(self, report: str) -> str:
+        """
+        Summarizes the detailed report for the Metaculus comment.
+        """
+        prompt = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes forecasting reports."},
+            {"role": "user", "content": f"Please summarize the following forecasting report into a concise comment suitable for Metaculus. Focus on the key reasoning and the final conclusion. Keep it under 200 words.\n\nReport:\n{report}"}
+        ]
+        summary = await self.backend_simple.generate(prompt)
+        return summary
+
     async def _run_forecast_on_binary(
         self, question: BinaryQuestion, research: str
     ) -> ReasonedPrediction[float]:
-        prompt = clean_indents(
-            f"""
-            You are a professional forecaster.
-            
-            Question: {question.question_text}
-            
-            Research Context:
-            {research}
-            
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
-            
-            Provide a forecast probability (0-100%) and reasoning.
-            
-            Structure your response as:
-            Reasoning: ...
-            Probability: XX%
-            """
-        )
-        # Use the backend directly or via ForecastBot's mechanism. 
-        # Here we use ForecastBot's get_llm for consistency with the base class if configured,
-        # or we could use self.backend. Let's use self.backend for consistency with AGForecast.
+        # 1. Define Schema (Binary is simple, but we follow the pattern)
+        # For binary, we just need a probability.
         
-        # Actually, ForecastBot expects us to return ReasonedPrediction.
-        # Let's use the standard ForecastBot flow for the final step to leverage structure_output
+        # 2. Run Community
+        # We need to adapt the community run to work with the pre-fetched research.
+        # The Community.run method expects 'global_context' and 'schema'.
         
-        reasoning = await self.get_llm("default", "llm").invoke(prompt)
-        binary_prediction: BinaryPrediction = await structure_output(
-            reasoning, BinaryPrediction, model=self.get_llm("parser", "llm")
-        )
-        decimal_pred = max(0.01, min(0.99, binary_prediction.prediction_in_decimal))
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        return ReasonedPrediction(prediction_value=decimal_pred, reasoning=reasoning)
+        # We can reuse the schema agent or just define a simple schema for binary
+        schema = "Define a function predict() -> {'yes': float, 'no': float} where 'yes' is the probability of the event occurring."
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        
+        # 3. Aggregate
+        predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        aggregated_prediction = self.consensus.aggregate(predictions) # Returns a dict like {'yes': 0.75, 'no': 0.25}
+        
+        # Extract probability
+        prob = aggregated_prediction.get("yes", 0.5)
+        decimal_pred = max(0.01, min(0.99, prob))
+        
+        # 4. Generate Summary for Comment
+        # We'll construct a report string from the individual forecasts to summarize
+        full_report = f"Aggregated Prediction: {decimal_pred:.2%}\n\n"
+        for res in community_results:
+            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            
+        summary = await self._summarize_report(full_report)
+        
+        return ReasonedPrediction(prediction_value=decimal_pred, reasoning=summary)
 
     async def _run_forecast_on_multiple_choice(
         self, question: MultipleChoiceQuestion, research: str
     ) -> ReasonedPrediction[PredictedOptionList]:
-        prompt = clean_indents(
-            f"""
-            You are a professional forecaster.
+        
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Schema for Multiple Choice
+        options_str = ", ".join(question.options)
+        schema = f"Define a function predict() -> Dict[str, float] where keys are exactly one of: [{options_str}]. Values must sum to 1."
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        
+        # Aggregate
+        predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        aggregated_prediction = self.consensus.aggregate(predictions) # Dict of option -> prob
+        
+        # Format for ForecastBot
+        predicted_options = []
+        for option, prob in aggregated_prediction.items():
+            if option in question.options:
+                predicted_options.append((option, prob))
+        
+        # Normalize if needed (MeanConsensus should handle it but good to be safe)
+        total_prob = sum(p for _, p in predicted_options)
+        if total_prob > 0:
+            predicted_options = [(o, p/total_prob) for o, p in predicted_options]
             
-            Question: {question.question_text}
-            Options: {question.options}
+        prediction_list = PredictedOptionList(predicted_options)
+        
+        # Summary
+        full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
+        for res in community_results:
+            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
             
-            Research Context:
-            {research}
-            
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
-            
-            Provide probabilities for each option.
-            """
-        )
-        parsing_instructions = clean_indents(
-            f"""
-            Make sure that all option names are one of the following:
-            {question.options}
-            """
-        )
-        reasoning = await self.get_llm("default", "llm").invoke(prompt)
-        predicted_option_list: PredictedOptionList = await structure_output(
-            text_to_structure=reasoning,
-            output_type=PredictedOptionList,
-            model=self.get_llm("parser", "llm"),
-            additional_instructions=parsing_instructions,
-        )
+        summary = await self._summarize_report(full_report)
+        
         return ReasonedPrediction(
-            prediction_value=predicted_option_list, reasoning=reasoning
+            prediction_value=prediction_list, reasoning=summary
         )
 
     async def _run_forecast_on_numeric(
         self, question: NumericQuestion, research: str
     ) -> ReasonedPrediction[NumericDistribution]:
-        prompt = clean_indents(
-            f"""
-            You are a professional forecaster.
+        
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Schema for Numeric
+        # We need a distribution. The community agents are prompted to return buckets or a distribution.
+        # For simplicity in this integration, let's ask for specific percentiles or buckets.
+        # However, ForecastBot expects a NumericDistribution.
+        # Let's ask for a dictionary of percentiles: {'p10': val, 'p25': val, 'p50': val, 'p75': val, 'p90': val}
+        
+        schema = "Define a function predict() -> {'p10': float, 'p25': float, 'p50': float, 'p75': float, 'p90': float} representing the 10th, 25th, 50th, 75th, and 90th percentiles."
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        
+        # Aggregate
+        predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        aggregated_prediction = self.consensus.aggregate(predictions)
+        
+        # Convert to Percentile list
+        percentiles = []
+        for key, val in aggregated_prediction.items():
+            if key.startswith('p'):
+                try:
+                    p_val = int(key[1:])
+                    percentiles.append(Percentile(value=val, percentile=p_val/100.0))
+                except:
+                    pass
+        
+        # Ensure we have enough data for a distribution, otherwise fallback
+        if not percentiles:
+             # Fallback if community fails to return valid percentiles
+             percentiles = [Percentile(value=0, percentile=0.5)] # Dummy
+             
+        prediction = NumericDistribution(percentiles) # Assuming constructor takes list of Percentile
+        
+        # Summary
+        full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
+        for res in community_results:
+            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
             
-            Question: {question.question_text}
-            
-            Research Context:
-            {research}
-            
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
-            
-            Provide a numeric distribution (percentiles).
-            """
-        )
-        reasoning = await self.get_llm("default", "llm").invoke(prompt)
-        percentile_list: list[Percentile] = await structure_output(
-            reasoning, list[Percentile], model=self.get_llm("parser", "llm")
-        )
-        prediction = NumericDistribution.from_question(percentile_list, question)
-        return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
+        summary = await self._summarize_report(full_report)
+        
+        return ReasonedPrediction(prediction_value=prediction, reasoning=summary)
 
 
 if __name__ == "__main__":
