@@ -2,6 +2,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from ag_forecast.src.backends.openrouter_backend import OpenRouterBackend
+from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
 from ag_forecast.src.data_mcps.openrouter_perplexity_mcp import OpenRouterPerplexityMCP
 from ag_forecast.src.workflows.agentic_retrieval import AgenticRetrieval
 from ag_forecast.src.workflows.researcher_agent import ResearcherAgent
@@ -26,6 +27,8 @@ async def main():
     
     # Configuration
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    asknews_client_id = os.getenv("ASKNEWS_CLIENT_ID")
+    asknews_secret = os.getenv("ASKNEWS_SECRET")
     
     if not openrouter_api_key:
         logger.error("OPENROUTER_API_KEY not found in environment variables")
@@ -44,6 +47,11 @@ async def main():
     data_mcps = {
         "perplexity": OpenRouterPerplexityMCP(api_key=openrouter_api_key)
     }
+    if asknews_client_id and asknews_secret:
+        data_mcps["asknews"] = AskNewsMCP(client_id=asknews_client_id, client_secret=asknews_secret)
+        logger.info("AskNews MCP enabled for agentic retrieval.")
+    else:
+        logger.info("ASKNEWS_CLIENT_ID or ASKNEWS_SECRET not found. AskNews will be disabled.")
     logger.info(f"Data MCPs: {list(data_mcps.keys())}")
     
     # Initialize Components
