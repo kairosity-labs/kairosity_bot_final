@@ -43,11 +43,14 @@ class IterativeResearchWorkflow:
             self.logger.subsection("PHASE 1: INITIAL RESEARCH")
         
         # 1. Initial Retrieval
-        retrieval_result = await self.retrieval.run(user_query, current_date)
+        retrieval_result = await self.retrieval.run(user_query, current_date, parent_ids=[])
         initial_context = retrieval_result.get("context_for_researchers", retrieval_result["summary"])
+        last_node_ids = [retrieval_result["last_node_id"]] if retrieval_result.get("last_node_id") else []
         
         # 2. Initial Analysis
-        analysis_result = await self.analyst_agent.run(user_query, initial_context, current_date)
+        analysis_result = await self.analyst_agent.run(user_query, initial_context, current_date, parent_ids=last_node_ids)
+        if analysis_result.get("last_node_id"):
+             last_node_ids = [analysis_result["last_node_id"]]
         
         # Add to global context
         global_context.append(f"--- Initial Research ---\nQuery: {user_query}\nAnalysis: {analysis_result['analysis']}")
@@ -59,8 +62,15 @@ class IterativeResearchWorkflow:
             
             # 1. Supervisor Review
             context_str = "\n\n".join(global_context)
-            supervisor_result = await self.supervisor.run(user_query, context_str, current_date)
+            supervisor_result = await self.supervisor.run(user_query, context_str, current_date, parent_ids=last_node_ids)
             
+            if supervisor_result.get("last_node_id"):
+                last_node_ids = [supervisor_result["last_node_id"]]
+            
+            print(f"DEBUG_PRINT: Round {round_num+1} Supervisor result last_node_id: {supervisor_result.get('last_node_id')}, current last_node_ids: {last_node_ids}")
+            if self.logger:
+                self.logger.info(f"DEBUG: Round {round_num+1} Supervisor result last_node_id: {supervisor_result.get('last_node_id')}, current last_node_ids: {last_node_ids}")
+
             if supervisor_result["is_sufficient"] or not supervisor_result["sub_queries"]:
                 if self.logger:
                     self.logger.info("Supervisor determined information is sufficient. Proceeding to forecast.")
@@ -69,7 +79,7 @@ class IterativeResearchWorkflow:
             # 2. Process Sub-queries
             sub_query_tasks = []
             for sub_q in supervisor_result["sub_queries"]:
-                sub_query_tasks.append(self._process_sub_query(sub_q["query"], current_date))
+                sub_query_tasks.append(self._process_sub_query(sub_q["query"], current_date, parent_ids=last_node_ids))
             
             if self.logger:
                 self.logger.info(f"Processing {len(sub_query_tasks)} sub-queries in parallel...")
@@ -77,8 +87,17 @@ class IterativeResearchWorkflow:
             sub_query_results = await asyncio.gather(*sub_query_tasks)
             
             # 3. Update Global Context
+            new_parent_ids = []
             for res in sub_query_results:
                 global_context.append(f"--- Sub-query: {res['query']} ---\nAnalysis: {res['analysis']}")
+                if res.get("last_node_id"):
+                    new_parent_ids.append(res["last_node_id"])
+            
+            if new_parent_ids:
+                last_node_ids = new_parent_ids
+            
+            if self.logger:
+                self.logger.info(f"DEBUG: Round {round_num+1} Sub-queries complete. new_parent_ids: {new_parent_ids}, updated last_node_ids: {last_node_ids}")
         
         # --- Final Phase ---
         if self.logger:
@@ -90,7 +109,10 @@ class IterativeResearchWorkflow:
         schema_result = await self.schema_agent.run(user_query, final_context_str, current_date)
         
         # 2. Run Community of Researchers (Forecasters)
-        community_results = await self.community.run(user_query, final_context_str, current_date, schema_result)
+        if self.logger:
+            self.logger.info(f"DEBUG: Calling Community.run with parent_ids={last_node_ids}")
+        print(f"DEBUG_PRINT: Calling Community.run with parent_ids={last_node_ids}")
+        community_results = await self.community.run(user_query, final_context_str, current_date, schema_result, parent_ids=last_node_ids)
         
         # 2. Aggregate Predictions
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
@@ -101,7 +123,8 @@ class IterativeResearchWorkflow:
             self.logger.save_consensus_data(aggregated_prediction)
             self.logger.log_event("Consensus", "final_forecast",
                                   input_data={"schema": schema_result},
-                                  output_data={"prediction": aggregated_prediction})
+                                  output_data={"prediction": aggregated_prediction},
+                                  parent_ids=last_node_ids) # Connect to last supervisor/analysis
             self.logger.section("EXECUTION COMPLETE")
             self.logger.info(f"All data saved to: {self.logger.get_run_dir()}")
         
@@ -112,14 +135,15 @@ class IterativeResearchWorkflow:
             "aggregated_prediction": aggregated_prediction
         }
 
-    async def _process_sub_query(self, query: str, current_date: str) -> Dict[str, Any]:
+    async def _process_sub_query(self, query: str, current_date: str, parent_ids: List[str] = None) -> Dict[str, Any]:
         """Helper to run retrieval and analysis for a single sub-query."""
         # 1. Retrieve
-        retrieval_result = await self.retrieval.run(query, current_date)
+        retrieval_result = await self.retrieval.run(query, current_date, parent_ids=parent_ids)
         context = retrieval_result.get("context_for_researchers", retrieval_result["summary"])
+        last_node_ids = [retrieval_result["last_node_id"]] if retrieval_result.get("last_node_id") else []
         
         # 2. Analyze
-        analysis_result = await self.analyst_agent.run(query, context, current_date)
+        analysis_result = await self.analyst_agent.run(query, context, current_date, parent_ids=last_node_ids)
         
         return analysis_result
 
@@ -140,11 +164,14 @@ class IterativeResearchWorkflow:
             self.logger.subsection("PHASE 1: INITIAL RESEARCH")
         
         # 1. Initial Retrieval
-        retrieval_result = await self.retrieval.run(user_query, current_date)
+        retrieval_result = await self.retrieval.run(user_query, current_date, parent_ids=[])
         initial_context = retrieval_result.get("context_for_researchers", retrieval_result["summary"])
+        last_node_ids = [retrieval_result["last_node_id"]] if retrieval_result.get("last_node_id") else []
         
         # 2. Initial Analysis
-        analysis_result = await self.analyst_agent.run(user_query, initial_context, current_date)
+        analysis_result = await self.analyst_agent.run(user_query, initial_context, current_date, parent_ids=last_node_ids)
+        if analysis_result.get("last_node_id"):
+             last_node_ids = [analysis_result["last_node_id"]]
         
         # Add to global context
         global_context.append(f"--- Initial Research ---\nQuery: {user_query}\nAnalysis: {analysis_result['analysis']}")
@@ -156,7 +183,10 @@ class IterativeResearchWorkflow:
             
             # 1. Supervisor Review
             context_str = "\n\n".join(global_context)
-            supervisor_result = await self.supervisor.run(user_query, context_str, current_date)
+            supervisor_result = await self.supervisor.run(user_query, context_str, current_date, parent_ids=last_node_ids)
+            
+            if supervisor_result.get("last_node_id"):
+                last_node_ids = [supervisor_result["last_node_id"]]
             
             if supervisor_result["is_sufficient"] or not supervisor_result["sub_queries"]:
                 if self.logger:
@@ -166,16 +196,27 @@ class IterativeResearchWorkflow:
             # 2. Process Sub-queries
             sub_query_tasks = []
             for sub_q in supervisor_result["sub_queries"]:
-                sub_query_tasks.append(self._process_sub_query(sub_q["query"], current_date))
+                sub_query_tasks.append(self._process_sub_query(sub_q["query"], current_date, parent_ids=last_node_ids))
             
             if self.logger:
                 self.logger.info(f"Processing {len(sub_query_tasks)} sub-queries in parallel...")
             
-            sub_query_results = await asyncio.gather(*sub_query_tasks)
+            sub_query_results = await asyncio.gather(*sub_query_tasks, return_exceptions=True)
             
             # 3. Update Global Context
-            for res in sub_query_results:
+            new_parent_ids = []
+            for i, res in enumerate(sub_query_results):
+                if isinstance(res, Exception):
+                    if self.logger:
+                        self.logger.error(f"Sub-query {i+1} failed with error: {res}")
+                    continue
+                
                 global_context.append(f"--- Sub-query: {res['query']} ---\nAnalysis: {res['analysis']}")
+                if res.get("last_node_id"):
+                    new_parent_ids.append(res["last_node_id"])
+            
+            if new_parent_ids:
+                last_node_ids = new_parent_ids
         
         final_context_str = "\n\n".join(global_context)
-        return final_context_str
+        return final_context_str, last_node_ids

@@ -63,7 +63,7 @@ class AGForecastBot(ForecastBot):
         # Community Backends
         self.backend_c1 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/gpt-5.1")
         self.backend_c2 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/o3-mini-high")
-        self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="google/gemini-3-pro-preview")
+        self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="anthropic/claude-sonnet-4.5")
         
         # Data MCPs
         self.data_mcps = {
@@ -82,7 +82,7 @@ class AGForecastBot(ForecastBot):
         # Community (Researchers)
         # 1. GPT-5.1
         # 2. o3-mini-high
-        # 3. Gemini 3 Pro
+        # 3. Claude Sonnet 4.5
         self.researchers = [
             ResearcherAgent(self.backend_c1, logger=self.ag_logger, agent_id=1),
             ResearcherAgent(self.backend_c2, logger=self.ag_logger, agent_id=2),
@@ -125,7 +125,12 @@ class AGForecastBot(ForecastBot):
         
         try:
             # Run research-only workflow
-            research_context = await self.workflow.run_research_only(query)
+            research_context, parent_ids = await self.workflow.run_research_only(query)
+            
+            # Store parent_ids in notepad for use in forecasting
+            notepad = await self._get_notepad(question)
+            notepad.note_entries["parent_ids"] = parent_ids
+            
             logger.info(f"Research completed for {question.page_url}")
             return research_context
         except Exception as e:
@@ -162,7 +167,11 @@ class AGForecastBot(ForecastBot):
             "description": "Define a function predict() -> {'yes': float, 'no': float} where 'yes' is the probability of the event occurring."
         }
         
-        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        # Retrieve parent_ids from notepad
+        notepad = await self._get_notepad(question)
+        parent_ids = notepad.note_entries.get("parent_ids", [])
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
         # 3. Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
@@ -223,7 +232,11 @@ class AGForecastBot(ForecastBot):
             "description": f"Define a function predict() -> Dict[str, float] where keys are exactly one of: [{options_str}]. Values must sum to 1."
         }
         
-        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        # Retrieve parent_ids from notepad
+        notepad = await self._get_notepad(question)
+        parent_ids = notepad.note_entries.get("parent_ids", [])
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
@@ -295,12 +308,15 @@ class AGForecastBot(ForecastBot):
         
         # Schema for Numeric
         schema = {
-            "schema_type": "Numeric Distribution",
-            "options": ["p10", "p25", "p50", "p75", "p90"],
-            "description": "Define a function predict() -> {'p10': float, 'p25': float, 'p50': float, 'p75': float, 'p90': float} representing the 10th, 25th, 50th, 75th, and 90th percentiles."
+            "schema_type": "Numeric",
+            "description": "Define a function predict() -> Dict[str, float] with keys 'p10', 'p50', 'p90' representing the 10th, 50th, and 90th percentiles."
         }
         
-        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        # Retrieve parent_ids from notepad
+        notepad = await self._get_notepad(question)
+        parent_ids = notepad.note_entries.get("parent_ids", [])
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
@@ -394,12 +410,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["tournament", "metaculus_cup", "test_questions"],
+        choices=["tournament", "metaculus_cup", "test_questions", "local_test"],
         default="tournament",
         help="Specify the run mode (default: tournament)",
     )
     args = parser.parse_args()
-    run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
+    run_mode: Literal["tournament", "metaculus_cup", "test_questions", "local_test"] = args.mode
     
     openrouter_key = os.getenv("OPENROUTER_API_KEY")
     if not openrouter_key:
@@ -458,5 +474,45 @@ if __name__ == "__main__":
         forecast_reports = asyncio.run(
             bot.forecast_questions(questions, return_exceptions=True)
         )
+    elif run_mode == "local_test":
+        # Local test mode without Metaculus API
+        logger.info("Running in LOCAL TEST mode - No Metaculus API calls")
+        
+        # Create a dummy question
+        question_text = "Will the WHO declare an avian influenza virus in humans a Public Health Emergency of International Concern before 2030?"
+        question = BinaryQuestion(
+            question_text=question_text,
+            id=999999,
+            page_url="https://local-test",
+            resolution_criteria="The World Health Organization (WHO) must declare a Public Health Emergency of International Concern (PHEIC) specifically regarding an avian influenza virus (e.g., H5N1) affecting humans before January 1, 2030.",
+            fine_print="The declaration must be official and explicitly mention avian influenza/bird flu in humans.",
+            background_info="Avian influenza has been a concern for years. H5N1 cases in humans have occurred.",
+            publish_time=datetime.now(),
+            close_time=datetime(2030, 1, 1),
+            resolve_time=datetime(2030, 1, 1)
+        )
+        
+        async def run_local():
+            # Initialize Notepad manually for local test
+            notepad = await bot._initialize_notepad(question)
+            async with bot._note_pad_lock:
+                bot._note_pads.append(notepad)
+            
+            try:
+                # 1. Research
+                research = await bot.run_research(question)
+                print("\n\n[LOCAL TEST] Research Completed:\n", research[:500], "...\n")
+                
+                # 2. Forecast
+                prediction = await bot._run_forecast_on_binary(question, research)
+                print("\n\n[LOCAL TEST] Prediction Generated:")
+                print(f"Probability: {prediction.prediction_value:.2%}")
+                print("Reasoning:", prediction.reasoning[:200], "...")
+            finally:
+                await bot._remove_notepad(question)
+            
+            return [] # No reports to log
+
+        forecast_reports = asyncio.run(run_local())
     
     bot.log_report_summary(forecast_reports)

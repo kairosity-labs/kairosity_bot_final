@@ -21,7 +21,7 @@ class SupervisorAgent:
         self.backend = backend
         self.logger = logger
 
-    async def run(self, user_query: str, global_context: str, current_date: str = None) -> Dict[str, Any]:
+    async def run(self, user_query: str, global_context: str, current_date: str = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
         if current_date is None:
             current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -43,9 +43,11 @@ class SupervisorAgent:
         if self.logger:
             self.logger.info(f"Critique: {output.critique}")
             self.logger.info(f"Is sufficient: {output.is_sufficient}")
-            self.logger.log_event("SupervisorAgent", "review",
+            self.logger.info(f"Is sufficient: {output.is_sufficient}")
+            review_node_id = self.logger.log_event("SupervisorAgent", "review",
                                   input_data={"global_context_length": len(global_context)},
-                                  output_data=output.dict())
+                                  output_data=output.dict(),
+                                  parent_ids=parent_ids)
             if not output.is_sufficient:
                 self.logger.info(f"Generated {len(output.sub_queries)} new sub-queries")
                 for q in output.sub_queries:
@@ -54,5 +56,6 @@ class SupervisorAgent:
         return {
             "critique": output.critique,
             "is_sufficient": output.is_sufficient,
-            "sub_queries": [q.dict() for q in output.sub_queries]
+            "sub_queries": [q.dict() for q in output.sub_queries],
+            "last_node_id": review_node_id if self.logger else None
         }

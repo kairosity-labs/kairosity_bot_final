@@ -1,0 +1,235 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Variables - Modern Slate Theme */
+:root {
+  --bg-primary: #0f1419;
+  --bg-secondary: #1a1f2e;
+  --bg-tertiary: #242938;
+  --bg-card: #1e2330;
+
+  --accent-research: #60a5fa;
+  --accent-community: #a78bfa;
+  --accent-consensus: #34d399;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --border-subtle: #2d3748;
+  --border-emphasis: #4a5568;
+}
+
+/* Base Styles */
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Segoe UI Symbol', sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* Smooth Transitions */
+* {
+  transition: background-color 200ms ease, border-color 200ms ease, opacity 200ms ease;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-emphasis);
+}
+
+/* Glassmorphism */
+.glass {
+  background: rgba(30, 35, 48, 0.7);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.glass-strong {
+  background: rgba(30, 35, 48, 0.9);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+/* Card System */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  transition: all 200ms ease;
+}
+
+.card:hover {
+  border-color: var(--border-emphasis);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Gradient Text */
+.gradient-text-research {
+  background: linear-gradient(135deg, var(--accent-research), #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-community {
+  background: linear-gradient(135deg, var(--accent-community), #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-consensus {
+  background: linear-gradient(135deg, var(--accent-consensus), #10b981);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Prose (Markdown) Styling */
+.prose {
+  color: var(--text-primary);
+  max-width: none;
+}
+
+.prose p {
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 1em;
+}
+
+.prose strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.prose a {
+  color: var(--accent-research);
+  text-decoration: underline;
+  text-decoration-color: rgba(96, 165, 250, 0.3);
+  transition: text-decoration-color 200ms;
+}
+
+.prose a:hover {
+  text-decoration-color: var(--accent-research);
+}
+
+.prose code {
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.prose pre {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 1em;
+  overflow-x: auto;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+}
+
+.prose ul,
+.prose ol {
+  margin-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.prose li {
+  margin-bottom: 0.5em;
+  color: var(--text-secondary);
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+/* Code Block Syntax Highlighting */
+.hljs {
+  background: var(--bg-primary) !important;
+  color: var(--text-secondary);
+  padding: 1em;
+  border-radius: 6px;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-title {
+  color: #a78bfa;
+}
+
+.hljs-string,
+.hljs-attr {
+  color: #34d399;
+}
+
+.hljs-number,
+.hljs-literal {
+  color: #60a5fa;
+}
+
+.hljs-comment {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Animations */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    max-height: 5000px;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.accordion-enter {
+  animation: slideDown 300ms ease-out;
+}
+
+.fade-in {
+  animation: fadeIn 200ms ease-out;
+}
