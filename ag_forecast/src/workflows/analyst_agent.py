@@ -18,7 +18,7 @@ class AnalystAgent:
         self.logger = logger
         self.agent_id = agent_id
 
-    async def run(self, query: str, context: str, current_date: str = None) -> Dict[str, Any]:
+    async def run(self, query: str, context: str, current_date: str = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
         if current_date is None:
             current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -36,13 +36,15 @@ class AnalystAgent:
         
         if self.logger:
             self.logger.researcher(self.agent_id, f"Analysis complete. Key points: {len(output.key_points)}")
-            self.logger.log_event("AnalystAgent", "analysis",
+            analysis_node_id = self.logger.log_event("AnalystAgent", "analysis",
                                   input_data={"query": query},
-                                  output_data=output.dict())
+                                  output_data=output.dict(),
+                                  parent_ids=parent_ids)
         
         return {
             "query": query,
             "analysis": output.analysis,
             "key_points": output.key_points,
-            "missing_info": output.missing_information
+            "missing_info": output.missing_information,
+            "last_node_id": analysis_node_id if self.logger else None
         }

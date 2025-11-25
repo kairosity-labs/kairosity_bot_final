@@ -44,18 +44,25 @@ class ForecastLogger:
         ch = logging.StreamHandler()
         ch.setFormatter(logging.Formatter('%(message)s'))
         self.logger.addHandler(ch)
+        
+        self.event_count = 0
 
-    def log_event(self, source: str, event_type: str, input_data: Any = None, output_data: Any = None):
+    def log_event(self, source: str, event_type: str, input_data: Any = None, output_data: Any = None, parent_ids: list[str] = None) -> str:
         """Log a structured event for the report generator."""
         event = {
             "timestamp": datetime.now().isoformat(),
             "source": source,
             "event_type": event_type,
             "input": input_data,
-            "output": output_data
+            "output": output_data,
+            "parent_ids": parent_ids or []
         }
         with open(self.events_file, 'a') as f:
             f.write(json.dumps(event) + "\n")
+        
+        event_id = str(self.event_count)
+        self.event_count += 1
+        return event_id
 
     def info(self, msg: str):
         self.logger.info(msg)

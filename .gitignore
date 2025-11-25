@@ -1,6 +1,8 @@
 ###  Specific to Project ###
 benchmarks/
 sandbox.py
+logs/
+venv_kairosity/
 
 
 ### General gitignore ###

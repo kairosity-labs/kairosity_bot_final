@@ -64,7 +64,7 @@ class AGForecastBot(ForecastBot):
         # Community Backends
         self.backend_c1 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/gpt-5.1")
         self.backend_c2 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/o3-mini-high")
-        self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="google/gemini-3-pro-preview")
+        self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="anthropic/claude-sonnet-4.5")
         
         # Data MCPs
         self.data_mcps = {
@@ -96,7 +96,7 @@ class AGForecastBot(ForecastBot):
         # Community (Researchers)
         # 1. GPT-5.1
         # 2. o3-mini-high
-        # 3. Gemini 3 Pro
+        # 3. Claude Sonnet 4.5
         self.researchers = [
             ResearcherAgent(self.backend_c1, logger=self.ag_logger, agent_id=1),
             ResearcherAgent(self.backend_c2, logger=self.ag_logger, agent_id=2),
@@ -139,7 +139,12 @@ class AGForecastBot(ForecastBot):
         
         try:
             # Run research-only workflow
-            research_context = await self.workflow.run_research_only(query)
+            research_context, parent_ids = await self.workflow.run_research_only(query)
+            
+            # Store parent_ids in notepad for use in forecasting
+            notepad = await self._get_notepad(question)
+            notepad.note_entries["parent_ids"] = parent_ids
+            
             logger.info(f"Research completed for {question.page_url}")
             return research_context
         except Exception as e:
@@ -170,12 +175,47 @@ class AGForecastBot(ForecastBot):
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # We can reuse the schema agent or just define a simple schema for binary
-        schema = "Define a function predict() -> {'yes': float, 'no': float} where 'yes' is the probability of the event occurring."
+        schema = {
+            "schema_type": "Binary (Probability)",
+            "options": ["yes", "no"],
+            "description": "Define a function predict() -> {'yes': float, 'no': float} where 'yes' is the probability of the event occurring."
+        }
         
-        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        # Retrieve parent_ids from notepad
+        notepad = await self._get_notepad(question)
+        parent_ids = notepad.note_entries.get("parent_ids", [])
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
         # 3. Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        if not predictions:
+            logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
+            prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide a forecast probability (0-100%) and reasoning.
+                
+                Structure your response as:
+                Reasoning: ...
+                Probability: XX%
+                """
+            )
+            reasoning = await self.get_llm("default", "llm").invoke(prompt)
+            binary_prediction: BinaryPrediction = await structure_output(
+                reasoning, BinaryPrediction, model=self.get_llm("parser", "llm")
+            )
+            decimal_pred = max(0.01, min(0.99, binary_prediction.prediction_in_decimal))
+            return ReasonedPrediction(prediction_value=decimal_pred, reasoning=reasoning)
+
         aggregated_prediction = self.consensus.aggregate(predictions) # Returns a dict like {'yes': 0.75, 'no': 0.25}
         
         # Extract probability
@@ -186,7 +226,7 @@ class AGForecastBot(ForecastBot):
         # We'll construct a report string from the individual forecasts to summarize
         full_report = f"Aggregated Prediction: {decimal_pred:.2%}\n\n"
         for res in community_results:
-            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            full_report += f"Agent {res.get('agent_id', '?')} Analysis:\n{res.get('analysis', 'No analysis')}\nPrediction: {res.get('prediction')}\n\n"
             
         summary = await self._summarize_report(full_report)
         
@@ -200,12 +240,54 @@ class AGForecastBot(ForecastBot):
         
         # Schema for Multiple Choice
         options_str = ", ".join(question.options)
-        schema = f"Define a function predict() -> Dict[str, float] where keys are exactly one of: [{options_str}]. Values must sum to 1."
+        schema = {
+            "schema_type": "Multiple Choice",
+            "options": question.options,
+            "description": f"Define a function predict() -> Dict[str, float] where keys are exactly one of: [{options_str}]. Values must sum to 1."
+        }
         
-        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        # Retrieve parent_ids from notepad
+        notepad = await self._get_notepad(question)
+        parent_ids = notepad.note_entries.get("parent_ids", [])
+        
+        community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        if not predictions:
+             logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
+             prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                Options: {question.options}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide probabilities for each option.
+                """
+            )
+             parsing_instructions = clean_indents(
+                f"""
+                Make sure that all option names are one of the following:
+                {question.options}
+                """
+            )
+             reasoning = await self.get_llm("default", "llm").invoke(prompt)
+             predicted_option_list: PredictedOptionList = await structure_output(
+                text_to_structure=reasoning,
+                output_type=PredictedOptionList,
+                model=self.get_llm("parser", "llm"),
+                additional_instructions=parsing_instructions,
+            )
+             return ReasonedPrediction(
+                prediction_value=predicted_option_list, reasoning=reasoning
+            )
+
         aggregated_prediction = self.consensus.aggregate(predictions) # Dict of option -> prob
         
         # Format for ForecastBot
@@ -224,7 +306,7 @@ class AGForecastBot(ForecastBot):
         # Summary
         full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
         for res in community_results:
-            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            full_report += f"Agent {res.get('agent_id', '?')} Analysis:\n{res.get('analysis', 'No analysis')}\nPrediction: {res.get('prediction')}\n\n"
             
         summary = await self._summarize_report(full_report)
         
@@ -239,17 +321,43 @@ class AGForecastBot(ForecastBot):
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Schema for Numeric
-        # We need a distribution. The community agents are prompted to return buckets or a distribution.
-        # For simplicity in this integration, let's ask for specific percentiles or buckets.
-        # However, ForecastBot expects a NumericDistribution.
-        # Let's ask for a dictionary of percentiles: {'p10': val, 'p25': val, 'p50': val, 'p75': val, 'p90': val}
+        schema = {
+            "schema_type": "Numeric",
+            "description": "Define a function predict() -> Dict[str, float] with keys 'p10', 'p50', 'p90' representing the 10th, 50th, and 90th percentiles."
+        }
         
-        schema = "Define a function predict() -> {'p10': float, 'p25': float, 'p50': float, 'p75': float, 'p90': float} representing the 10th, 25th, 50th, 75th, and 90th percentiles."
+        # Retrieve parent_ids from notepad
+        notepad = await self._get_notepad(question)
+        parent_ids = notepad.note_entries.get("parent_ids", [])
         
-        community_results = await self.community.run(question.question_text, research, current_date, schema)
+        community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
         # Aggregate
         predictions = [res["prediction"] for res in community_results if "prediction" in res]
+        
+        if not predictions:
+             logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
+             prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide a numeric distribution (percentiles).
+                """
+            )
+             reasoning = await self.get_llm("default", "llm").invoke(prompt)
+             percentile_list: list[Percentile] = await structure_output(
+                reasoning, list[Percentile], model=self.get_llm("parser", "llm")
+            )
+             prediction = NumericDistribution.from_question(percentile_list, question)
+             return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
+
         aggregated_prediction = self.consensus.aggregate(predictions)
         
         # Convert to Percentile list
@@ -265,14 +373,34 @@ class AGForecastBot(ForecastBot):
         # Ensure we have enough data for a distribution, otherwise fallback
         if not percentiles:
              # Fallback if community fails to return valid percentiles
-             percentiles = [Percentile(value=0, percentile=0.5)] # Dummy
+             logger.warning("Community returned invalid percentiles. Falling back to legacy.")
+             prompt = clean_indents(
+                f"""
+                You are a professional forecaster.
+                
+                Question: {question.question_text}
+                
+                Research Context:
+                {research}
+                
+                Today is {datetime.now().strftime("%Y-%m-%d")}.
+                
+                Provide a numeric distribution (percentiles).
+                """
+            )
+             reasoning = await self.get_llm("default", "llm").invoke(prompt)
+             percentile_list: list[Percentile] = await structure_output(
+                reasoning, list[Percentile], model=self.get_llm("parser", "llm")
+            )
+             prediction = NumericDistribution.from_question(percentile_list, question)
+             return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
              
         prediction = NumericDistribution(percentiles) # Assuming constructor takes list of Percentile
         
         # Summary
         full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
         for res in community_results:
-            full_report += f"Agent {res['agent_id']} Analysis:\n{res['content']}\nPrediction: {res.get('prediction')}\n\n"
+            full_report += f"Agent {res.get('agent_id', '?')} Analysis:\n{res.get('analysis', 'No analysis')}\nPrediction: {res.get('prediction')}\n\n"
             
         summary = await self._summarize_report(full_report)
         
@@ -296,12 +424,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["tournament", "metaculus_cup", "test_questions"],
+        choices=["tournament", "metaculus_cup", "test_questions", "local_test"],
         default="tournament",
         help="Specify the run mode (default: tournament)",
     )
     args = parser.parse_args()
-    run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
+    run_mode: Literal["tournament", "metaculus_cup", "test_questions", "local_test"] = args.mode
     
     openrouter_key = os.getenv("OPENROUTER_API_KEY")
     if not openrouter_key:
@@ -360,5 +488,45 @@ if __name__ == "__main__":
         forecast_reports = asyncio.run(
             bot.forecast_questions(questions, return_exceptions=True)
         )
+    elif run_mode == "local_test":
+        # Local test mode without Metaculus API
+        logger.info("Running in LOCAL TEST mode - No Metaculus API calls")
+        
+        # Create a dummy question
+        question_text = "Will the WHO declare an avian influenza virus in humans a Public Health Emergency of International Concern before 2030?"
+        question = BinaryQuestion(
+            question_text=question_text,
+            id=999999,
+            page_url="https://local-test",
+            resolution_criteria="The World Health Organization (WHO) must declare a Public Health Emergency of International Concern (PHEIC) specifically regarding an avian influenza virus (e.g., H5N1) affecting humans before January 1, 2030.",
+            fine_print="The declaration must be official and explicitly mention avian influenza/bird flu in humans.",
+            background_info="Avian influenza has been a concern for years. H5N1 cases in humans have occurred.",
+            publish_time=datetime.now(),
+            close_time=datetime(2030, 1, 1),
+            resolve_time=datetime(2030, 1, 1)
+        )
+        
+        async def run_local():
+            # Initialize Notepad manually for local test
+            notepad = await bot._initialize_notepad(question)
+            async with bot._note_pad_lock:
+                bot._note_pads.append(notepad)
+            
+            try:
+                # 1. Research
+                research = await bot.run_research(question)
+                print("\n\n[LOCAL TEST] Research Completed:\n", research[:500], "...\n")
+                
+                # 2. Forecast
+                prediction = await bot._run_forecast_on_binary(question, research)
+                print("\n\n[LOCAL TEST] Prediction Generated:")
+                print(f"Probability: {prediction.prediction_value:.2%}")
+                print("Reasoning:", prediction.reasoning[:200], "...")
+            finally:
+                await bot._remove_notepad(question)
+            
+            return [] # No reports to log
+
+        forecast_reports = asyncio.run(run_local())
     
     bot.log_report_summary(forecast_reports)

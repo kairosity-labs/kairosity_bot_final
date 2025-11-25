@@ -27,7 +27,7 @@ class AgenticRetrieval:
         self.max_rounds = max_rounds
         self.logger = logger
 
-    async def run(self, user_query: str, current_date: str = None) -> Dict[str, Any]:
+    async def run(self, user_query: str, current_date: str = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
         if current_date is None:
             current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -42,6 +42,9 @@ class AgenticRetrieval:
         # Build context as Q&A pairs
         qa_pairs = []
         all_retrieved_data = []
+        
+        # Track the last set of node IDs to connect the next step to
+        current_parent_ids = parent_ids or []
         
         for round_num in range(self.max_rounds):
             if self.logger:
@@ -65,12 +68,21 @@ class AgenticRetrieval:
             
             step_plan = await self.backend.generate_structured(messages, RetrievalStep)
             
+            if not step_plan:
+                if self.logger:
+                    self.logger.error("Failed to generate retrieval step plan (parsed response is None). Skipping round.")
+                continue
+
             if self.logger:
                 self.logger.info(f"Reasoning: {step_plan.reasoning}")
                 self.logger.info(f"Is sufficient: {step_plan.is_sufficient}")
-                self.logger.log_event("AgenticRetrieval", "reasoning", 
+                self.logger.info(f"Is sufficient: {step_plan.is_sufficient}")
+                reasoning_node_id = self.logger.log_event("AgenticRetrieval", "reasoning", 
                                       input_data={"round": round_num+1, "context": context_str},
-                                      output_data=step_plan.dict())
+                                      output_data=step_plan.dict(),
+                                      parent_ids=current_parent_ids)
+                # The reasoning node becomes the parent for the searches
+                current_parent_ids = [reasoning_node_id]
             
             if step_plan.is_sufficient:
                 if self.logger:
@@ -108,9 +120,16 @@ class AgenticRetrieval:
                         result
                     )
                     self.logger.info(f"Retrieved {len(result)} results from search {query_idx + 1}")
-                    self.logger.log_event("AgenticRetrieval", "search_result",
+                    self.logger.info(f"Retrieved {len(result)} results from search {query_idx + 1}")
+                    search_node_id = self.logger.log_event("AgenticRetrieval", "search_result",
                                           input_data={"query": search_query.query, "source": search_query.source},
-                                          output_data=result)
+                                          output_data=result,
+                                          parent_ids=[reasoning_node_id]) # Search connects to Reasoning
+                    
+                    # Collect search node IDs for the next step (Reasoning or Summary)
+                    if query_idx == 0:
+                        current_parent_ids = [] # Reset for this batch of searches
+                    current_parent_ids.append(search_node_id)
                 
                 all_retrieved_data.extend(result)
                 
@@ -144,16 +163,19 @@ class AgenticRetrieval:
         
         if self.logger:
             self.logger.info(f"Summary: {final_summary[:500]}...")
-            self.logger.log_event("AgenticRetrieval", "summary",
+            self.logger.info(f"Summary: {final_summary[:500]}...")
+            summary_node_id = self.logger.log_event("AgenticRetrieval", "summary",
                                   input_data={"user_query": user_query, "retrieved_count": len(all_retrieved_data)},
-                                  output_data=final_summary)
+                                  output_data=final_summary,
+                                  parent_ids=current_parent_ids) # Connects to last search results
         
         result = {
             "query": user_query,
             "retrieved_data": all_retrieved_data,
             "qa_pairs": qa_pairs,
             "summary": final_summary,
-            "rounds_used": round_num + 1
+            "rounds_used": round_num + 1,
+            "last_node_id": summary_node_id
         }
         
         # Save structured data

@@ -7,7 +7,7 @@ class Community:
         self.agents = agents
         self.logger = logger
 
-    async def run(self, question: str, context: str, current_date: str = None, prediction_schema: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    async def run(self, question: str, context: str, current_date: str = None, prediction_schema: Dict[str, Any] = None, parent_ids: List[str] = None) -> List[Dict[str, Any]]:
         """
         Run all agents in parallel.
         """
@@ -15,7 +15,7 @@ class Community:
             self.logger.subsection("COMMUNITY OF RESEARCHERS")
             self.logger.info(f"Running {len(self.agents)} researchers in parallel")
         
-        tasks = [agent.run(question, context, current_date, prediction_schema) for agent in self.agents]
+        tasks = [agent.run(question, context, current_date, prediction_schema, parent_ids) for agent in self.agents]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         valid_results = []

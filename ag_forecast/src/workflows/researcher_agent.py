@@ -28,7 +28,7 @@ class ResearcherAgent:
         self.logger = logger
         self.agent_id = agent_id
 
-    async def run(self, question: str, context: str, current_date: str = None, prediction_schema: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def run(self, question: str, context: str, current_date: str = None, prediction_schema: Dict[str, Any] = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
         if current_date is None:
             current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -39,13 +39,20 @@ class ResearcherAgent:
         # Format prompt with schema if provided
         system_prompt = RESEARCHER_AGENT_SYSTEM_PROMPT.format(current_date=current_date)
         if prediction_schema:
-            schema_instruction = (
-                f"\n\nIMPORTANT: You must use the following prediction schema:\n"
-                f"Type: {prediction_schema.get('schema_type')}\n"
-                f"Options (Keys): {prediction_schema.get('options')}\n"
-                f"Description: {prediction_schema.get('description')}\n"
-                f"Your `predict()` function MUST return a dictionary with EXACTLY these keys."
-            )
+            if isinstance(prediction_schema, str):
+                schema_instruction = (
+                    f"\n\nIMPORTANT: You must use the following prediction schema:\n"
+                    f"{prediction_schema}\n"
+                    f"Your `predict()` function MUST return a dictionary matching this description."
+                )
+            else:
+                schema_instruction = (
+                    f"\n\nIMPORTANT: You must use the following prediction schema:\n"
+                    f"Type: {prediction_schema.get('schema_type')}\n"
+                    f"Options (Keys): {prediction_schema.get('options')}\n"
+                    f"Description: {prediction_schema.get('description')}\n"
+                    f"Your `predict()` function MUST return a dictionary with EXACTLY these keys."
+                )
             system_prompt += schema_instruction
             
         messages = [
@@ -96,7 +103,8 @@ class ResearcherAgent:
                                               "analysis": output.analysis,
                                               "code": output.python_code,
                                               "followup_queries": [q.dict() for q in output.followup_queries]
-                                          })
+                                          },
+                                          parent_ids=parent_ids)
                 
                 # If successful, return
                 return {
