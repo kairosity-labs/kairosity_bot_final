@@ -395,7 +395,7 @@ class AGForecastBot(ForecastBot):
              prediction = NumericDistribution.from_question(percentile_list, question)
              return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
              
-        prediction = NumericDistribution(percentiles) # Assuming constructor takes list of Percentile
+        prediction = NumericDistribution.from_question(percentiles, question)
         
         # Summary
         full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
