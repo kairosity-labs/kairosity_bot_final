@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import requests
 import traceback
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -418,7 +419,13 @@ class ForecastBot(ABC):
             errors=all_errors,
         )
         if self.publish_reports_to_metaculus:
-            await report.publish_report_to_metaculus()
+            try:
+                await report.publish_report_to_metaculus()
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 405:
+                    logger.warning(f"Could not publish report to Metaculus for question {question.page_url}: {e}")
+                else:
+                    raise e
         await self._remove_notepad(question)
         return report
 

@@ -22,6 +22,7 @@ from forecasting_tools import (
     Percentile,
     BinaryPrediction,
     PredictedOptionList,
+    PredictedOption,
     ReasonedPrediction,
     clean_indents,
     structure_output,
@@ -301,7 +302,11 @@ class AGForecastBot(ForecastBot):
         if total_prob > 0:
             predicted_options = [(o, p/total_prob) for o, p in predicted_options]
             
-        prediction_list = PredictedOptionList(predicted_options)
+        predicted_options_objects = []
+        for option, prob in predicted_options:
+             predicted_options_objects.append(PredictedOption(option_name=option, probability=prob))
+            
+        prediction_list = PredictedOptionList(predicted_options=predicted_options_objects)
         
         # Summary
         full_report = f"Aggregated Prediction: {aggregated_prediction}\n\n"
