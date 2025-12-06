@@ -19,7 +19,6 @@ from forecasting_tools import (
     MultipleChoiceQuestion,
     NumericDistribution,
     NumericQuestion,
-    Percentile,
     BinaryPrediction,
     PredictedOptionList,
     PredictedOption,
@@ -27,6 +26,8 @@ from forecasting_tools import (
     clean_indents,
     structure_output,
 )
+
+from forecasting_tools.data_models.numeric_report import Percentile
 
 # AGForecast Imports
 from ag_forecast.src.backends.openrouter_backend import OpenRouterBackend
