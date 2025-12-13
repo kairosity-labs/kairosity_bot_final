@@ -13,6 +13,9 @@ class OpenAIBackend(BaseBackend):
         self.client = AsyncOpenAI(**client_kwargs)
 
     async def generate(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        # Set default max_tokens if not provided to prevent truncation
+        if 'max_tokens' not in kwargs:
+            kwargs['max_tokens'] = 4096
         response = await self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
@@ -21,6 +24,9 @@ class OpenAIBackend(BaseBackend):
         return response.choices[0].message.content
 
     async def generate_structured(self, messages: List[Dict[str, str]], response_model: type[BaseModel], **kwargs) -> BaseModel:
+        # Set default max_tokens if not provided to prevent JSON truncation
+        if 'max_tokens' not in kwargs:
+            kwargs['max_tokens'] = 4096
         response = await self.client.beta.chat.completions.parse(
             model=self.model_name,
             messages=messages,
@@ -30,6 +36,9 @@ class OpenAIBackend(BaseBackend):
         return response.choices[0].message.parsed
 
     async def tool_call(self, messages: List[Dict[str, str]], tools: List[Dict[str, Any]], **kwargs) -> Union[str, Dict[str, Any]]:
+        # Set default max_tokens if not provided
+        if 'max_tokens' not in kwargs:
+            kwargs['max_tokens'] = 4096
         response = await self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,

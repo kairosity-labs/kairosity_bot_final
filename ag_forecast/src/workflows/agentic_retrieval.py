@@ -5,15 +5,16 @@ from ag_forecast.src.backends.base import BaseBackend
 from ag_forecast.src.data_mcps.base import BaseDataMCP
 from ag_forecast.src.prompts import (
     AGENTIC_RETRIEVAL_SYSTEM_PROMPT,
-    AGENTIC_RETRIEVAL_USER_PROMPT,
+    get_agentic_retrieval_user_prompt,
     AGENTIC_RETRIEVAL_SUMMARY_SYSTEM_PROMPT,
     AGENTIC_RETRIEVAL_SUMMARY_USER_PROMPT
 )
+from ag_forecast.src.workflows.query_optimizer import QueryOptimizer
 
 class SearchQuery(BaseModel):
     query: str
     rationale: str
-    source: str  # e.g., "perplexity", "asknews", "duckduckgo"
+    source: str
 
 class RetrievalStep(BaseModel):
     reasoning: str
@@ -26,6 +27,9 @@ class AgenticRetrieval:
         self.data_mcps = data_mcps
         self.max_rounds = max_rounds
         self.logger = logger
+        
+        # Initialize Query Optimizer
+        self.query_optimizer = QueryOptimizer(backend, logger)
 
     async def run(self, user_query: str, current_date: str = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
@@ -57,16 +61,35 @@ class AgenticRetrieval:
             ]) if qa_pairs else "No information retrieved yet."
             
             # 1. Reason and generate search queries
+            # Generate dynamic user prompt based on available MCPs
+            user_prompt = get_agentic_retrieval_user_prompt(list(self.data_mcps.keys()))
+            
             messages = [
                 {"role": "system", "content": AGENTIC_RETRIEVAL_SYSTEM_PROMPT.format(
                     current_date=current_date,
                     user_query=user_query, 
                     sources=list(self.data_mcps.keys())
                 )},
-                {"role": "user", "content": AGENTIC_RETRIEVAL_USER_PROMPT.format(context=context_str)}
+                {"role": "user", "content": user_prompt.format(query=user_query, context=context_str)}
             ]
             
-            step_plan = await self.backend.generate_structured(messages, RetrievalStep)
+            # Try to generate structured output with retry logic
+            step_plan = None
+            max_retries = 2
+            for retry in range(max_retries):
+                try:
+                    # Increase max_tokens on retry
+                    max_tokens = 4096 if retry == 0 else 8192
+                    step_plan = await self.backend.generate_structured(messages, RetrievalStep, max_tokens=max_tokens)
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if self.logger:
+                        self.logger.error(f"Failed to generate retrieval step plan (attempt {retry + 1}/{max_retries}): {e}")
+                    if retry == max_retries - 1:
+                        # Last retry failed, skip this round
+                        if self.logger:
+                            self.logger.error("All retries exhausted. Skipping round.")
+                        continue
             
             if not step_plan:
                 if self.logger:
@@ -89,22 +112,66 @@ class AgenticRetrieval:
                     self.logger.info("Agent determined information is sufficient. Stopping retrieval.")
                 break
             
-            # 2. Execute search queries in parallel
+            # 2. Optimize queries for each source
             if self.logger:
-                self.logger.info(f"Generated {len(step_plan.search_queries)} search queries")
-                for i, sq in enumerate(step_plan.search_queries):
-                    self.logger.info(f"  - Query: '{sq.query}' via {sq.source} (Rationale: {sq.rationale})")
+                self.logger.info(f"\nOptimizing {len(step_plan.search_queries)} search queries...")
+            
+            optimized_queries = await self.query_optimizer.optimize_queries(
+                step_plan.search_queries,
+                user_query,
+                current_date
+            )
+            
+            # Log optimization results
+            if self.logger:
+                self.logger.info(f"Generated {len(optimized_queries)} optimized queries (from {len(step_plan.search_queries)} original)")
+                optimization_node_id = self.logger.log_event(
+                    "AgenticRetrieval", 
+                    "query_optimization",
+                    input_data={
+                        "original_queries": [sq.dict() for sq in step_plan.search_queries],
+                        "round": round_num + 1
+                    },
+                    output_data=[oq.dict() for oq in optimized_queries],
+                    parent_ids=[reasoning_node_id]
+                )
+                # Optimization node becomes parent for searches
+                current_parent_ids = [optimization_node_id]
+            
+            # 3. Execute optimized search queries in parallel
+            if self.logger:
+                self.logger.info(f"Executing {len(optimized_queries)} search queries...")
             
             search_tasks = []
-            for i, search_query in enumerate(step_plan.search_queries):
-                if search_query.source in self.data_mcps:
-                    mcp = self.data_mcps[search_query.source]
-                    search_tasks.append((i, search_query, mcp.search(search_query.query)))
+            # Build mapping from optimized queries back to original for logging
+            query_mapping = {}  # Maps optimized query index to original SearchQuery
             
-            results = await asyncio.gather(*[task for _, _, task in search_tasks], return_exceptions=True)
+            for i, opt_query in enumerate(optimized_queries):
+                # Find corresponding original query (handle multi-query expansion)
+                # For now, we'll create a pseudo original query for expanded queries
+                original_idx = min(i, len(step_plan.search_queries) - 1)
+                original_query = step_plan.search_queries[original_idx]
+                query_mapping[i] = original_query
+                
+                # Determine source from the original query
+                source = original_query.source
+                
+                if source in self.data_mcps:
+                    mcp = self.data_mcps[source]
+                    search_tasks.append((
+                        i, 
+                        original_query, 
+                        opt_query, 
+                        mcp.search(opt_query.query, **opt_query.kwargs)
+                    ))
+                else:
+                    if self.logger:
+                        self.logger.warning(f"Source '{source}' not available in data_mcps, skipping query {i+1}")
+            
+            results = await asyncio.gather(*[task for _, _, _, task in search_tasks], return_exceptions=True)
             
             # Process results and build Q&A pairs
-            for (query_idx, search_query, _), result in zip(search_tasks, results):
+            for (query_idx, original_query, opt_query, _), result in zip(search_tasks, results):
                 if isinstance(result, Exception):
                     if self.logger:
                         self.logger.error(f"Search failed: {result}")
@@ -115,18 +182,37 @@ class AgenticRetrieval:
                     self.logger.save_query_data(
                         round_num + 1,
                         query_idx + 1,
-                        search_query.query,
-                        search_query.source,
+                        opt_query.query,
+                        original_query.source,
                         result
                     )
                     self.logger.info(f"Retrieved {len(result)} results from search {query_idx + 1}")
-                    self.logger.info(f"Retrieved {len(result)} results from search {query_idx + 1}")
-                    search_node_id = self.logger.log_event("AgenticRetrieval", "search_result",
-                                          input_data={"query": search_query.query, "source": search_query.source},
-                                          output_data=result,
-                                          parent_ids=[reasoning_node_id]) # Search connects to Reasoning
+                    self.logger.info(f"  Original: '{original_query.query}'")
+                    self.logger.info(f"  Optimized: '{opt_query.query}'")
+                    if opt_query.kwargs:
+                        self.logger.info(f"  Kwargs: {opt_query.kwargs}")
+                    # Log actual result details for proof
+                    if result:
+                        self.logger.info(f"  Results from {original_query.source}:")
+                        for idx, item in enumerate(result[:3], 1):  # Show first 3 results
+                            title = item.get("title", "No title")
+                            url = item.get("url", "No URL")
+                            self.logger.info(f"    {idx}. {title}")
+                            self.logger.info(f"       URL: {url}")
+                    search_node_id = self.logger.log_event(
+                        "AgenticRetrieval", 
+                        "search_result",
+                        input_data={
+                            "original_query": original_query.query,
+                            "optimized_query": opt_query.query,
+                            "kwargs": opt_query.kwargs,
+                            "source": original_query.source
+                        },
+                        output_data=result,
+                        parent_ids=current_parent_ids  # Connect to optimization node
+                    )
                     
-                    # Collect search node IDs for the next step (Reasoning or Summary)
+                    # Collect search node IDs for the next step (Summary)
                     if query_idx == 0:
                         current_parent_ids = [] # Reset for this batch of searches
                     current_parent_ids.append(search_node_id)
@@ -136,9 +222,9 @@ class AgenticRetrieval:
                 # Build Q&A pair for this query
                 answer = "\n".join([item.get("content", "") for item in result])
                 qa_pairs.append({
-                    "query": search_query.query,
+                    "query": original_query.query,
                     "answer": answer,
-                    "source": search_query.source
+                    "source": original_query.source
                 })
         
         # 3. Generate final summary
@@ -147,7 +233,7 @@ class AgenticRetrieval:
         
         # Build final context with all Q&A pairs
         final_context = "\n\n".join([
-            f"Q: {qa['query']}\nA: {qa['answer']}" 
+            f"Search Query: {qa['query']}\nAnswer: {qa['answer']}\nSource: {qa['source']}" 
             for qa in qa_pairs
         ])
         

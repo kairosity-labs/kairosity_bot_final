@@ -5,6 +5,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colored output for different log levels."""
+    
+    # ANSI color codes
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    RESET = '\033[0m'
+    
+    def format(self, record):
+        # Apply color based on log level
+        if record.levelno >= logging.ERROR:
+            record.msg = f"{self.RED}{record.msg}{self.RESET}"
+        elif record.levelno >= logging.WARNING:
+            record.msg = f"{self.YELLOW}{record.msg}{self.RESET}"
+        # INFO and below remain default color (white)
+        
+        return super().format(record)
+
 class ForecastLogger:
     """Logger for forecasting bot with unique file per execution."""
     
@@ -35,14 +53,14 @@ class ForecastLogger:
         self.logger = logging.getLogger("ForecastBot")
         self.logger.setLevel(logging.INFO)
         
-        # File handler (human readable)
+        # File handler (human readable, no colors)
         fh = logging.FileHandler(self.log_file)
         fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(fh)
         
-        # Console handler
+        # Console handler (with colors)
         ch = logging.StreamHandler()
-        ch.setFormatter(logging.Formatter('%(message)s'))
+        ch.setFormatter(ColoredFormatter('%(message)s'))
         self.logger.addHandler(ch)
         
         self.event_count = 0
@@ -89,6 +107,10 @@ class ForecastLogger:
     def error(self, message: str):
         """Log error message."""
         self.logger.error(message)
+    
+    def warning(self, message: str):
+        """Log warning message."""
+        self.logger.warning(message)
     
     def researcher(self, researcher_num: int, message: str):
         """Log researcher-specific message."""

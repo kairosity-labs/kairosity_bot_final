@@ -6,7 +6,7 @@ from ag_forecast.src.bot.forecasting_bot import ForecastingBot
 from ag_forecast.src.community.community import Community
 from ag_forecast.src.consensus.base import MeanConsensus
 from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
-from ag_forecast.src.data_mcps.perplexity_mcp import PerplexityMCP
+from ag_forecast.src.data_mcps.openroute_perplexity_mcp import OpenRouterPerplexityMCP
 from ag_forecast.src.workflows.agentic_retrieval import AgenticRetrieval
 from ag_forecast.src.workflows.researcher_agent import ResearcherAgent
 
@@ -25,7 +25,7 @@ async def main() -> None:
 
     data_mcps: dict[str, object] = {}
     if perplexity_api_key:
-        data_mcps["perplexity"] = PerplexityMCP(api_key=perplexity_api_key)
+        data_mcps["perplexity"] = OpenRouterPerplexityMCP(api_key=perplexity_api_key)
     else:
         print("Warning: PERPLEXITY_API_KEY not found. Retrieval might be limited.")
 

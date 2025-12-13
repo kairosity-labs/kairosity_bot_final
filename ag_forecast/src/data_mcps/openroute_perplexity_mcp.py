@@ -2,10 +2,13 @@ import os
 import httpx
 from typing import List, Dict, Any
 from .base import BaseDataMCP
-from ag_forecast.src.prompts import PERPLEXITY_SYSTEM_PROMPT
 
 class OpenRouterPerplexityMCP(BaseDataMCP):
-    def __init__(self, api_key: str = None, model: str = "openai/gpt-4o-mini-search-preview", **kwargs):
+    """
+    Perplexity search via OpenRouter API.
+    Uses OpenRouter to access Perplexity's online models.
+    """
+    def __init__(self, api_key: str = None, model: str = "perplexity/sonar-pro", **kwargs):
         super().__init__(api_key, **kwargs)
         self.api_key = self.api_key or os.getenv("OPENROUTER_API_KEY")
         self.model = model
@@ -13,7 +16,8 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
 
     async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
         """
-        Uses OpenRouter to access Perplexity online models.
+        Perplexity search via OpenRouter.
+        Returns content with citations if available.
         """
         from datetime import datetime
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -27,7 +31,7 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": PERPLEXITY_SYSTEM_PROMPT.format(current_date=current_date)},
+                {"role": "system", "content": f"You are a helpful research assistant. Be precise and concise. Current date: {current_date}"},
                 {"role": "user", "content": query}
             ],
             **kwargs
@@ -44,19 +48,8 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
             message = data["choices"][0]["message"]
             content = message["content"]
             
-            # Citation Parsing Logic
-            citations = []
-            
-            # 1. Check for OpenAI Search 'annotations' format
-            if "annotations" in message:
-                for annotation in message["annotations"]:
-                    if annotation.get("type") == "url_citation":
-                        cit = annotation.get("url_citation", {})
-                        citations.append(cit.get("url"))
-            
-            # 2. Check for Perplexity 'citations' format (top-level)
-            elif "citations" in data:
-                citations = data["citations"]
+            # Parse citations (Perplexity models may return citations)
+            citations = data.get("citations", [])
             
             return [{
                 "content": content,

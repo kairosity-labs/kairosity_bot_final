@@ -22,11 +22,12 @@ class ResearchOutput(BaseModel):
     python_code: str  # The code must define a function `predict() -> Dict[str, float]`
 
 class ResearcherAgent:
-    def __init__(self, backend: BaseBackend, max_retries: int = 3, logger=None, agent_id: int = 0):
+    def __init__(self, backend: BaseBackend, max_retries: int = 3, logger=None, agent_id: int = 0, max_tokens: Optional[int] = None):
         self.backend = backend
         self.max_retries = max_retries
         self.logger = logger
         self.agent_id = agent_id
+        self.max_tokens = max_tokens  # Optional max_tokens override for reasoning models
 
     async def run(self, question: str, context: str, current_date: str = None, prediction_schema: Dict[str, Any] = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
@@ -66,7 +67,10 @@ class ResearcherAgent:
                     self.logger.researcher(self.agent_id, f"Attempt {attempt + 1}/{self.max_retries}")
                 
                 # 1. Generate Analysis and Code
-                output = await self.backend.generate_structured(messages, ResearchOutput)
+                kwargs = {}
+                if self.max_tokens is not None:
+                    kwargs['max_tokens'] = self.max_tokens
+                output = await self.backend.generate_structured(messages, ResearchOutput, **kwargs)
                 
                 if self.logger:
                     self.logger.researcher(self.agent_id, f"Analysis: {output.analysis[:200]}...")

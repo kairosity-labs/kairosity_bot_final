@@ -4,9 +4,16 @@ import TextCard from './TextCard';
 import CodeCard from './CodeCard';
 import ArrayCard from './ArrayCard';
 import ObjectCard from './ObjectCard';
+import SearchResultCard from './SearchResultCard';
 
 const JsonCard = ({ label, value, nested = false }) => {
     const type = detectCardType(label, value);
+
+    if (type === 'array' && label.toLowerCase().includes('output') &&
+        Array.isArray(value) && value.length > 0 &&
+        value[0]?.source?.includes('search')) {
+        return <SearchResultCard label={label} value={value} />;
+    }
 
     // Handle null/undefined
     if (type === 'null') {

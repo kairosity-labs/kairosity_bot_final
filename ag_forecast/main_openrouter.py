@@ -3,7 +3,8 @@ import os
 from dotenv import load_dotenv
 from ag_forecast.src.backends.openrouter_backend import OpenRouterBackend
 from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
-from ag_forecast.src.data_mcps.openrouter_perplexity_mcp import OpenRouterPerplexityMCP
+from ag_forecast.src.data_mcps.openroute_perplexity_mcp import OpenRouterPerplexityMCP
+from ag_forecast.src.data_mcps.openrouter_gpt4o_mcp import OpenRouterGPT4OMCP
 from ag_forecast.src.workflows.agentic_retrieval import AgenticRetrieval
 from ag_forecast.src.workflows.researcher_agent import ResearcherAgent
 from ag_forecast.src.workflows.analyst_agent import AnalystAgent

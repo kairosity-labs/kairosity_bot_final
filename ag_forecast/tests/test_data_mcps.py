@@ -1,14 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ag_forecast.src.data_mcps.perplexity_mcp import PerplexityMCP
+from ag_forecast.src.data_mcps.openroute_perplexity_mcp import OpenRouterPerplexityMCP
 from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
 from ag_forecast.src.data_mcps.duckduckgo_mcp import DuckDuckGoMCP
 
 
 @pytest.mark.asyncio
 async def test_perplexity_search() -> None:
-    with patch("ag_forecast.src.data_mcps.perplexity_mcp.httpx.AsyncClient") as MockClient:
+    with patch("ag_forecast.src.data_mcps.openroute_perplexity_mcp.httpx.AsyncClient") as MockClient:
         mock_instance = MockClient.return_value.__aenter__.return_value
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -17,11 +17,12 @@ async def test_perplexity_search() -> None:
         }
         mock_instance.post = AsyncMock(return_value=mock_response)
 
-        mcp = PerplexityMCP(api_key="test")
+        mcp = OpenRouterPerplexityMCP(api_key="test")
         results = await mcp.search("query")
         assert len(results) == 1
         assert results[0]["content"] == "Perplexity answer"
         assert results[0]["citations"] == ["http://example.com"]
+        assert results[0]["source"] == "perplexity_openrouter"
 
 
 @pytest.mark.asyncio

@@ -31,8 +31,12 @@ from forecasting_tools.data_models.numeric_report import Percentile
 
 # AGForecast Imports
 from ag_forecast.src.backends.openrouter_backend import OpenRouterBackend
+from ag_forecast.src.data_mcps.google_search_mcp import GoogleSearchMCP
+from ag_forecast.src.data_mcps.google_scrape_mcp import GoogleScrapeMCP
 from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
-from ag_forecast.src.data_mcps.openrouter_perplexity_mcp import OpenRouterPerplexityMCP
+from ag_forecast.src.data_mcps.openrouter_gpt4o_mcp import OpenRouterGPT4OMCP
+from ag_forecast.src.data_mcps.openroute_perplexity_mcp import OpenRouterPerplexityMCP
+from ag_forecast.src.data_mcps.duckduckgo_mcp import DuckDuckGoMCP
 from ag_forecast.src.workflows.agentic_retrieval import AgenticRetrieval
 from ag_forecast.src.workflows.researcher_agent import ResearcherAgent
 from ag_forecast.src.workflows.analyst_agent import AnalystAgent
@@ -70,21 +74,21 @@ class AGForecastBot(ForecastBot):
         
         # Data MCPs
         self.data_mcps = {
-            "perplexity": OpenRouterPerplexityMCP(
-                api_key=openrouter_api_key,
-                model="openai/gpt-4o-mini-search-preview",
-            )
+            "google_search": GoogleSearchMCP(), 
+            "google_scrape": GoogleScrapeMCP(),
+            "duckduckgo": DuckDuckGoMCP()
         }
-        asknews_client_id = os.getenv("ASKNEWS_CLIENT_ID")
-        asknews_secret = os.getenv("ASKNEWS_SECRET")
-        if asknews_client_id and asknews_secret:
-            self.data_mcps["asknews"] = AskNewsMCP(
-                client_id=asknews_client_id,
-                client_secret=asknews_secret,
-            )
-            self.ag_logger.info("AskNews MCP enabled for agentic retrieval.")
-        else:
-            self.ag_logger.info("ASKNEWS_CLIENT_ID or ASKNEWS_SECRET not found. AskNews will be disabled.")
+
+        # asknews_client_id = os.getenv("ASKNEWS_CLIENT_ID")
+        # asknews_secret = os.getenv("ASKNEWS_SECRET")
+        # if asknews_client_id and asknews_secret:
+        #     self.data_mcps["asknews"] = AskNewsMCP(
+        #         client_id=asknews_client_id,
+        #         client_secret=asknews_secret,
+        #     )
+        #     self.ag_logger.info("AskNews MCP enabled for agentic retrieval.")
+        # else:
+        #     self.ag_logger.info("ASKNEWS_CLIENT_ID or ASKNEWS_SECRET not found. AskNews will be disabled.")
         
         # Initialize Agents
         # Simple LLM calls: Agentic Retrieval, Analyst, Schema Agent
@@ -96,12 +100,12 @@ class AGForecastBot(ForecastBot):
         self.supervisor = SupervisorAgent(self.backend_supervisor, logger=self.ag_logger)
         
         # Community (Researchers)
-        # 1. GPT-5.1
-        # 2. o3-mini-high
+        # 1. GPT-5.1 (o1 reasoning model - needs higher max_tokens)
+        # 2. o3-mini-high (o3 reasoning model - needs higher max_tokens)
         # 3. Claude Sonnet 4.5
         self.researchers = [
-            ResearcherAgent(self.backend_c1, logger=self.ag_logger, agent_id=1),
-            ResearcherAgent(self.backend_c2, logger=self.ag_logger, agent_id=2),
+            ResearcherAgent(self.backend_c1, logger=self.ag_logger, agent_id=1, max_tokens=16384),
+            ResearcherAgent(self.backend_c2, logger=self.ag_logger, agent_id=2, max_tokens=16384),
             ResearcherAgent(self.backend_c3, logger=self.ag_logger, agent_id=3)
         ]
         self.community = Community(self.researchers, logger=self.ag_logger)
@@ -484,7 +488,7 @@ if __name__ == "__main__":
         )
     elif run_mode == "test_questions":
         EXAMPLE_QUESTIONS = [
-            "https://www.metaculus.com/questions/578/human-extinction-by-2100/",
+            "https://www.metaculus.com/questions/40959/top-netflix-views-in-christmas-week-2025/"
         ]
         bot.skip_previously_forecasted_questions = False
         questions = [
@@ -498,18 +502,36 @@ if __name__ == "__main__":
         # Local test mode without Metaculus API
         logger.info("Running in LOCAL TEST mode - No Metaculus API calls")
         
-        # Create a dummy question
-        question_text = "Will the WHO declare an avian influenza virus in humans a Public Health Emergency of International Concern before 2030?"
+        # President's Malaria Initiative question - FETCHED FROM METACULUS
+        question_text = "Will the President's Malaria Initiative program cease to exist before January 1, 2026?"
         question = BinaryQuestion(
             question_text=question_text,
-            id=999999,
-            page_url="https://local-test",
-            resolution_criteria="The World Health Organization (WHO) must declare a Public Health Emergency of International Concern (PHEIC) specifically regarding an avian influenza virus (e.g., H5N1) affecting humans before January 1, 2030.",
-            fine_print="The declaration must be official and explicitly mention avian influenza/bird flu in humans.",
-            background_info="Avian influenza has been a concern for years. H5N1 cases in humans have occurred.",
+            id=39348,
+            page_url="https://www.metaculus.com/questions/39348/presidents-malaria-initiative-terminated-by-jan-1-2026/",
+            background_info="""According to its Wayback Machine January 17, 2025 archive, the President's Malaria Initiative (PMI) is described as follows:
+
+> The U.S. Government's focal point for the global fight against malaria, the U.S. President's Malaria Initiative has helped save millions of lives and contributed to substantial gains in education, productivity, and economic development.
+
+> PMI started as a five-year initiative with the goal of reducing malaria deaths by 50% in 15 African countries. Thanks to the bipartisan support of Congress and the generosity of the American people, PMI now works in 27 partner countries in sub-Saharan Africa and three programs in the Greater Mekong Subregion in Southeast Asia–representing about 90% of the global malaria burden.
+
+Created in 2005 under President George W. Bush, PMI has been credited with saving approximately 940,000 lives in the 2005-2017 time period, mainly in Subsaharan Africa and the Greater Mekong Subregion of Southeast Asia.
+
+On January 20, 2025, newly-inaugurated President Trump signed Executive Order 14169 Reevaluating and Realigning United States Foreign Aid, which targeted in particular USAID, which operates the PMI program.
+
+According to the Kaiser Family Foundation: Despite the emergency humanitarian waiver specifying life-saving medicine and medical services, it was still unclear what programs it actually applied to and whether it included services provided by PEPFAR, the President's Malaria Initiative, and other health programs. As a result, the PEPFAR program applied for a specific waiver, which was granted on February 1, for certain activities. No other waivers have been announced for any other U.S. global health program, such as for the President's Malaria Initiative (PMI).
+
+As of February 23, 2025, USAID was beginning a round of mass layoffs of thousands of staffers, leaving the future of programs such as PMI in doubt.""",
+            resolution_criteria="""This question resolves as **Yes** if the United States President's Malaria Initiative (PMI) ceases to exist before January 1, 2026. This can come about through any of the following mechanisms:
+
+* the initiative being terminated.
+* the initiative and/or its functions merging with or being consolidated into another program or agency, with PMI no longer continuing to operate as a distinct organization.
+* the program having its public funding eliminated by Congress.""",
+            fine_print="""* Because PMI was created by law, an enacted law that satisfies one of the above requirements would resolve the question as **Yes** immediately. In the event a presidential action would satisfy the above, the question will resolve as **Yes** if the action has taken effect for 60 consecutive days without being stayed, blocked, or otherwise halted by a federal court. In the event a presidential action is temporarily blocked by a court but later goes into effect for 60 days the question will resolve as **Yes**. The 60 day period must complete before January 1, 2026.
+* Partial termination or partial elimination of funding is not sufficient.
+* PMI being renamed will not count, as long as the core mission of funding global control of malaria remains intact within the same program.""",
             publish_time=datetime.now(),
-            close_time=datetime(2030, 1, 1),
-            resolve_time=datetime(2030, 1, 1)
+            close_time=datetime(2025, 11, 23, 18, 35, 58),  # Actual close time from Metaculus
+            resolve_time=datetime(2026, 1, 1)  # Resolution deadline
         )
         
         async def run_local():
