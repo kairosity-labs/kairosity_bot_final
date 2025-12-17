@@ -88,6 +88,7 @@ class ResearcherAgent:
                 if not isinstance(prediction, dict):
                     raise ValueError("`predict` function must return a dictionary.")
                 
+                node_id = None  # Initialize for case when logger is not set
                 if self.logger:
                     self.logger.researcher(self.agent_id, f"Prediction: {prediction}")
                     self.logger.researcher(self.agent_id, f"Follow-up queries: {len(output.followup_queries)}")
@@ -100,7 +101,7 @@ class ResearcherAgent:
                         output.analysis,
                         [q.dict() for q in output.followup_queries]
                     )
-                    self.logger.log_event(f"ResearcherAgent_{self.agent_id}", "prediction",
+                    node_id = self.logger.log_event(f"ResearcherAgent_{self.agent_id}", "prediction",
                                           input_data={"question": question, "schema": prediction_schema},
                                           output_data={
                                               "prediction": prediction,
@@ -110,14 +111,15 @@ class ResearcherAgent:
                                           },
                                           parent_ids=parent_ids)
                 
-                # If successful, return
+                # If successful, return (include last_node_id for graph connectivity)
                 return {
                     "analysis": output.analysis,
                     "model_desc": output.math_model_description,
                     "code": output.python_code,
                     "prediction": prediction,
                     "followup_queries": [q.dict() for q in output.followup_queries],
-                    "attempt": attempt + 1
+                    "attempt": attempt + 1,
+                    "last_node_id": node_id
                 }
                 
             except Exception as e:

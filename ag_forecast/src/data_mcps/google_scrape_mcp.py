@@ -13,18 +13,31 @@ class GoogleScrapeMCP(BaseDataMCP):
         self.search_mcp = GoogleSearchMCP()
         self.content_extractor = ContentExtractor()
 
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
-        is_news = kwargs.get('is_news', False)
-        date_before = kwargs.get('date_before')
-        max_summaries = kwargs.get('max_summaries', 10)
+    async def search(self, query: str) -> List[Dict[str, Any]]:
+        if not query:
+            return []
+            
+        query = query.replace('"', '').replace("'", '').strip()
         
-        # Get search results
-        search_results = await self.search_mcp.search(
-            query, 
-            is_news=is_news, 
-            date_before=date_before, 
-            max_results=max_summaries * 3  # Get more to filter
-        )
+        # Hardcoded defaults for scraping
+        is_news = False # Always deep research for scrape
+        date_before = None
+        max_summaries = 5 # Expensive operation, limit to 5
+        
+        # Retry logic with exponential backoff for robustness
+        max_retries = 3
+        base_delay = 5  # Start with 5 seconds
+        
+        # Get search results - pass all kwargs including query
+        # We override max_results for the search phase to get enough candidates
+        search_kwargs = {
+            'query': query,
+            'is_news': is_news,
+            'date_before': date_before,
+            'max_results': max_summaries * 3
+        }
+        
+        search_results = await self.search_mcp.search(**search_kwargs)
         
         if not search_results:
             return []

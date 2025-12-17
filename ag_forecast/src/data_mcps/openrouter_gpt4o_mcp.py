@@ -11,7 +11,7 @@ class OpenRouterGPT4OMCP(BaseDataMCP):
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
 
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+    async def search(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Uses OpenRouter to access gpt-4o-mini-search-preview.
         """
@@ -28,7 +28,7 @@ class OpenRouterGPT4OMCP(BaseDataMCP):
             "model": self.model,
             "messages": [
                 {"role": "system", "content": GPT4O_SYSTEM_PROMPT.format(current_date=current_date)},
-                {"role": "user", "content": query}
+                {"role": "user", "content": kwargs.get('query', kwargs.get('q', ''))}
             ],
             **kwargs
         }

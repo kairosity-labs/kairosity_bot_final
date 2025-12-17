@@ -13,10 +13,10 @@ class AnalystOutput(BaseModel):
     missing_information: str
 
 class AnalystAgent:
-    def __init__(self, backend: BaseBackend, logger=None, agent_id: int = 0):
+    def __init__(self, backend: BaseBackend, logger=None, max_tokens: int = 16384):
         self.backend = backend
         self.logger = logger
-        self.agent_id = agent_id
+        self.max_tokens = max_tokens
 
     async def run(self, query: str, context: str, current_date: str = None, parent_ids: List[str] = None) -> Dict[str, Any]:
         from datetime import datetime
@@ -24,7 +24,7 @@ class AnalystAgent:
             current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         if self.logger:
-            self.logger.researcher(self.agent_id, f"Analyzing sub-query: {query}")
+            self.logger.info(f"Analyzing sub-query: {query}")
         
         messages = [
             {"role": "system", "content": ANALYST_AGENT_SYSTEM_PROMPT.format(current_date=current_date)},
@@ -32,10 +32,10 @@ class AnalystAgent:
         ]
 
         # Generate Analysis
-        output = await self.backend.generate_structured(messages, AnalystOutput)
+        output = await self.backend.generate_structured(messages, AnalystOutput, max_tokens=self.max_tokens)
         
         if self.logger:
-            self.logger.researcher(self.agent_id, f"Analysis complete. Key points: {len(output.key_points)}")
+            self.logger.info(f"Analysis complete. Key points: {len(output.key_points)}")
             analysis_node_id = self.logger.log_event("AnalystAgent", "analysis",
                                   input_data={"query": query},
                                   output_data=output.dict(),

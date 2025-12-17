@@ -16,7 +16,11 @@ class AskNewsMCP(BaseDataMCP):
         self.searcher = AskNewsSearcher(client_id=client_id, client_secret=client_secret)
         self.max_retries = max_retries
 
-    async def search(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
+    async def search(self, query: str) -> list[dict[str, Any]]:
+        # Hardcoded defaults: kw method, both return type, last 48 hours, 10 results
+        if not query:
+            return []
+        
         # Use semaphore to ensure only one request at a time
         async with self._semaphore:
             # Retry with exponential backoff for rate limit errors

@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Literal
+from typing import Literal, List, Dict, Any
 
 from dotenv import load_dotenv
 
@@ -33,6 +33,9 @@ from forecasting_tools.data_models.numeric_report import Percentile
 from ag_forecast.src.backends.openrouter_backend import OpenRouterBackend
 from ag_forecast.src.data_mcps.google_search_mcp import GoogleSearchMCP
 from ag_forecast.src.data_mcps.google_scrape_mcp import GoogleScrapeMCP
+from ag_forecast.src.data_mcps.parallel_mcp import ParallelMCP
+from ag_forecast.src.data_mcps.perplexity_search_mcp import PerplexitySearchMCP
+from ag_forecast.src.data_mcps.perplexity_sonar_mcp import PerplexitySonarMCP
 from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
 from ag_forecast.src.data_mcps.openrouter_gpt4o_mcp import OpenRouterGPT4OMCP
 from ag_forecast.src.data_mcps.openroute_perplexity_mcp import OpenRouterPerplexityMCP
@@ -41,9 +44,11 @@ from ag_forecast.src.workflows.agentic_retrieval import AgenticRetrieval
 from ag_forecast.src.workflows.researcher_agent import ResearcherAgent
 from ag_forecast.src.workflows.analyst_agent import AnalystAgent
 from ag_forecast.src.workflows.supervisor_agent import SupervisorAgent
+from ag_forecast.src.workflows.reporter_agent import ReporterAgent
 from ag_forecast.src.workflows.iterative_research import IterativeResearchWorkflow
 from ag_forecast.src.community.community import Community
 from ag_forecast.src.consensus.base import MeanConsensus
+from ag_forecast.src.consensus.AgenticConsensus import AgenticConsensus
 from ag_forecast.src.workflows.schema_agent import SchemaAgent
 from ag_forecast.src.utils.logger import ForecastLogger
 
@@ -64,18 +69,21 @@ class AGForecastBot(ForecastBot):
         
         # Backends
         # User request: "anthropic/claude-sonnet-4.5". 
-        self.backend_simple = OpenRouterBackend(api_key=openrouter_api_key, model_name="anthropic/claude-sonnet-4.5")
+        # self.backend_simple = OpenRouterBackend(api_key=openrouter_api_key, model_name="anthropic/claude-sonnet-4.5")
+        self.backend_simple = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/gpt-5.1")
         self.backend_supervisor = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/gpt-5.1")
         
         # Community Backends
         self.backend_c1 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/gpt-5.1")
         self.backend_c2 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/o3-mini-high")
-        self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="anthropic/claude-sonnet-4.5")
+        # self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="anthropic/claude-sonnet-4.5")
+        self.backend_c3 = OpenRouterBackend(api_key=openrouter_api_key, model_name="openai/gpt-5.1")
         
         # Data MCPs
         self.data_mcps = {
-            "google_search": GoogleSearchMCP(), 
-            "google_scrape": GoogleScrapeMCP(),
+            "parallel": ParallelMCP(),
+            "perplexity_search": PerplexitySearchMCP(),
+            "perplexity_sonar": PerplexitySonarMCP(),
             "duckduckgo": DuckDuckGoMCP()
         }
 
@@ -92,24 +100,27 @@ class AGForecastBot(ForecastBot):
         
         # Initialize Agents
         # Simple LLM calls: Agentic Retrieval, Analyst, Schema Agent
-        self.retrieval = AgenticRetrieval(self.backend_simple, self.data_mcps, max_rounds=3, logger=self.ag_logger)
-        self.analyst = AnalystAgent(self.backend_simple, logger=self.ag_logger)
+        self.retrieval = AgenticRetrieval(self.backend_simple, self.data_mcps, max_rounds=3, max_queries=10, max_tokens=32768, logger=self.ag_logger)
+        self.analyst = AnalystAgent(self.backend_simple, logger=self.ag_logger, max_tokens=32768)
         self.schema_agent = SchemaAgent(self.backend_simple, logger=self.ag_logger)
         
         # Supervisor
-        self.supervisor = SupervisorAgent(self.backend_supervisor, logger=self.ag_logger)
+        self.supervisor = SupervisorAgent(self.backend_supervisor, max_tokens=32768, logger=self.ag_logger)
         
         # Community (Researchers)
         # 1. GPT-5.1 (o1 reasoning model - needs higher max_tokens)
         # 2. o3-mini-high (o3 reasoning model - needs higher max_tokens)
         # 3. Claude Sonnet 4.5
         self.researchers = [
-            ResearcherAgent(self.backend_c1, logger=self.ag_logger, agent_id=1, max_tokens=16384),
-            ResearcherAgent(self.backend_c2, logger=self.ag_logger, agent_id=2, max_tokens=16384),
-            ResearcherAgent(self.backend_c3, logger=self.ag_logger, agent_id=3)
+            ResearcherAgent(self.backend_c1, logger=self.ag_logger, agent_id=1, max_tokens=32768),
+            ResearcherAgent(self.backend_c2, logger=self.ag_logger, agent_id=2, max_tokens=32768),
+            ResearcherAgent(self.backend_c3, logger=self.ag_logger, agent_id=3, max_tokens=32768)
         ]
         self.community = Community(self.researchers, logger=self.ag_logger)
-        self.consensus = MeanConsensus()
+        self.consensus = AgenticConsensus(self.backend_simple, max_tokens=32768, logger=self.ag_logger)
+        
+        # Reporter
+        self.reporter = ReporterAgent(self.backend_simple, max_tokens=32768, logger=self.ag_logger)
         
         # Workflow
         self.workflow = IterativeResearchWorkflow(
@@ -152,6 +163,7 @@ class AGForecastBot(ForecastBot):
             notepad.note_entries["parent_ids"] = parent_ids
             
             logger.info(f"Research completed for {question.page_url}")
+
             return research_context
         except Exception as e:
             logger.error(f"Error during research for {question.page_url}: {e}")
@@ -167,6 +179,92 @@ class AGForecastBot(ForecastBot):
         ]
         summary = await self.backend_simple.generate(prompt)
         return summary
+    
+    async def generate_report(
+        self,
+        question: MetaculusQuestion,
+        research_context: str,
+        researcher_outputs: List[Dict[str, Any]],
+        consensus_output: Dict[str, Any],
+        supervisor_critique: str
+    ) -> str:
+        from datetime import datetime
+        
+        report = await self.reporter.run(
+            question=question.question_text,
+            research_context=research_context,
+            researcher_outputs=researcher_outputs,
+            consensus_output=consensus_output,
+            supervisor_critique=supervisor_critique
+        )
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"report_{timestamp}_{question.id}.md"
+        report_path = f"reports/{safe_filename}"
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report)
+        
+        logger.info(f"Report saved to {report_path}")
+        return report
+
+    async def _generate_report(
+        self,
+        question,  # Can be str or question object
+        research_context: str,
+        researcher_outputs: List[Dict[str, Any]],
+        consensus_output: Dict[str, Any],
+        supervisor_critique: str,
+        current_date: str = None
+    ) -> str:
+        """
+        Generate a forecasting report using ReporterAgent.
+        
+        Args:
+            question: The forecasting question (str or question object)
+            research_context: Research context/findings
+            researcher_outputs: List of researcher output dicts
+            consensus_output: Consensus aggregation output dict
+            supervisor_critique: Supervisor's critique text
+            current_date: Current date string (generated if not provided)
+            
+        Returns:
+            Markdown formatted report string
+        """
+        from datetime import datetime
+        
+        # Handle both string and question object
+        question_text = question.question_text if hasattr(question, 'question_text') else str(question)
+        
+        # Use provided current_date or generate new one
+        if current_date is None:
+            current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Call ReporterAgent with actual parameters
+        report = await self.reporter.run(
+            question=question_text,
+            research_context=research_context,
+            researcher_outputs=researcher_outputs,
+            consensus_output=consensus_output,
+            supervisor_critique=supervisor_critique,
+            current_date=current_date
+        )
+        
+        # Save report to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"report_{timestamp}.md"
+        report_path = f"logs/reports/{safe_filename}"
+        
+        import os
+        os.makedirs("logs/reports", exist_ok=True)
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report)
+        
+        logger.info(f"Report saved to {report_path}")
+        
+        return report
+
 
     async def _run_forecast_on_binary(
         self, question: BinaryQuestion, research: str
@@ -193,9 +291,8 @@ class AGForecastBot(ForecastBot):
         
         community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
-        # 3. Aggregate
-        predictions = [res["prediction"] for res in community_results if "prediction" in res]
-        if not predictions:
+        # 3. Aggregate using AgenticConsensus (intelligent weighted consensus)
+        if not community_results:
             logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
             prompt = clean_indents(
                 f"""
@@ -222,7 +319,19 @@ class AGForecastBot(ForecastBot):
             decimal_pred = max(0.01, min(0.99, binary_prediction.prediction_in_decimal))
             return ReasonedPrediction(prediction_value=decimal_pred, reasoning=reasoning)
 
-        aggregated_prediction = self.consensus.aggregate(predictions) # Returns a dict like {'yes': 0.75, 'no': 0.25}
+        # Use AgenticConsensus with full researcher outputs for intelligent weighting
+        if isinstance(self.consensus, AgenticConsensus):
+            # Extract researcher node IDs for graph linking
+            researcher_node_ids = [res.get("last_node_id") for res in community_results if res.get("last_node_id")]
+            consensus_result = await self.consensus.aggregate_async(
+                community_results, question.question_text, schema, current_date,
+                parent_ids=researcher_node_ids
+            )
+            aggregated_prediction = consensus_result["prediction"]
+        else:
+            # Fallback for statistical consensus (MeanConsensus, etc.)
+            predictions = [res["prediction"] for res in community_results if "prediction" in res]
+            aggregated_prediction = self.consensus.aggregate(predictions)
         
         # Extract probability
         prob = aggregated_prediction.get("yes", 0.5)
@@ -258,9 +367,8 @@ class AGForecastBot(ForecastBot):
         
         community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
-        # Aggregate
-        predictions = [res["prediction"] for res in community_results if "prediction" in res]
-        if not predictions:
+        # Aggregate using AgenticConsensus (intelligent weighted consensus)
+        if not community_results:
              logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
              prompt = clean_indents(
                 f"""
@@ -294,7 +402,19 @@ class AGForecastBot(ForecastBot):
                 prediction_value=predicted_option_list, reasoning=reasoning
             )
 
-        aggregated_prediction = self.consensus.aggregate(predictions) # Dict of option -> prob
+        # Use AgenticConsensus with full researcher outputs for intelligent weighting
+        if isinstance(self.consensus, AgenticConsensus):
+            # Extract researcher node IDs for graph linking
+            researcher_node_ids = [res.get("last_node_id") for res in community_results if res.get("last_node_id")]
+            consensus_result = await self.consensus.aggregate_async(
+                community_results, question.question_text, schema, current_date,
+                parent_ids=researcher_node_ids
+            )
+            aggregated_prediction = consensus_result["prediction"]
+        else:
+            # Fallback for statistical consensus
+            predictions = [res["prediction"] for res in community_results if "prediction" in res]
+            aggregated_prediction = self.consensus.aggregate(predictions)
         
         # Format for ForecastBot
         predicted_options = []
@@ -322,7 +442,10 @@ class AGForecastBot(ForecastBot):
         
         return ReasonedPrediction(
             prediction_value=prediction_list, reasoning=summary
-        )
+        ), {
+            "community_results": community_results,
+            "consensus_result": consensus_result,
+        }
 
     async def _run_forecast_on_numeric(
         self, question: NumericQuestion, research: str
@@ -342,10 +465,8 @@ class AGForecastBot(ForecastBot):
         
         community_results = await self.community.run(question.question_text, research, current_date, schema, parent_ids=parent_ids)
         
-        # Aggregate
-        predictions = [res["prediction"] for res in community_results if "prediction" in res]
-        
-        if not predictions:
+        # Aggregate using AgenticConsensus (intelligent weighted consensus)
+        if not community_results:
              logger.warning("No valid predictions from community. Falling back to legacy single-LLM forecast.")
              prompt = clean_indents(
                 f"""
@@ -368,7 +489,19 @@ class AGForecastBot(ForecastBot):
              prediction = NumericDistribution.from_question(percentile_list, question)
              return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
 
-        aggregated_prediction = self.consensus.aggregate(predictions)
+        # Use AgenticConsensus with full researcher outputs for intelligent weighting
+        if isinstance(self.consensus, AgenticConsensus):
+            # Extract researcher node IDs for graph linking
+            researcher_node_ids = [res.get("last_node_id") for res in community_results if res.get("last_node_id")]
+            consensus_result = await self.consensus.aggregate_async(
+                community_results, question.question_text, schema, current_date,
+                parent_ids=researcher_node_ids
+            )
+            aggregated_prediction = consensus_result["prediction"]
+        else:
+            # Fallback for statistical consensus
+            predictions = [res["prediction"] for res in community_results if "prediction" in res]
+            aggregated_prediction = self.consensus.aggregate(predictions)
         
         # Convert to Percentile list
         percentiles = []
@@ -500,38 +633,27 @@ if __name__ == "__main__":
         )
     elif run_mode == "local_test":
         # Local test mode without Metaculus API
-        logger.info("Running in LOCAL TEST mode - No Metaculus API calls")
+        logger.info("!!FORECAST")
         
-        # President's Malaria Initiative question - FETCHED FROM METACULUS
-        question_text = "Will the President's Malaria Initiative program cease to exist before January 1, 2026?"
-        question = BinaryQuestion(
+        question_text = "What will the Fed decision in January 2026 be?"
+        question = MultipleChoiceQuestion(
             question_text=question_text,
-            id=39348,
-            page_url="https://www.metaculus.com/questions/39348/presidents-malaria-initiative-terminated-by-jan-1-2026/",
-            background_info="""According to its Wayback Machine January 17, 2025 archive, the President's Malaria Initiative (PMI) is described as follows:
+            options = ["Fed maintains rate", "Cut 25bps", "Cut >25bps", "Hike 25bps", "Hike >25bps"],
+            background_info = """The Federal Open Market Committee (FOMC) sets U.S. monetary policy, including the target range for the federal funds rate. The January 2026 FOMC meeting is scheduled for Jan 27–28, 2026, and the Committee typically releases its policy statement at 2:00 p.m. ET on the second day.
 
-> The U.S. Government's focal point for the global fight against malaria, the U.S. President's Malaria Initiative has helped save millions of lives and contributed to substantial gains in education, productivity, and economic development.
+This question is about the size of the rate *hike* or *cut decided at that January 2026 meeting, measured in basis points (bps), where 25 bps = 0.25 percentage points. In the associated Kalshi event, the outcomes are bucketed into Fed maintains rate, Cut 25bps, Cut >25bps, Hike 25bps, Hike >25bps with outcomes verified from the Federal Reserve.""",
+            resolution_criteria="""This question resolves to exactly one of the following outcomes based on the Federal Reserve System’s documented decision for the specified <meeting> (January 28, 2026), as of the contract’s Expiration Date/Expiration Time:
 
-> PMI started as a five-year initiative with the goal of reducing malaria deaths by 50% in 15 African countries. Thanks to the bipartisan support of Congress and the generosity of the American people, PMI now works in 27 partner countries in sub-Saharan Africa and three programs in the Greater Mekong Subregion in Southeast Asia–representing about 90% of the global malaria burden.
+- "Fed maintains rate" if the FOMC makes **no change** to the target federal funds rate range.
+- "Cut 25bps" if the FOMC **cuts** (reduces) the target range by **exactly 25 basis points (0.25%)**.
+- "Cut >25bps" if the FOMC **cuts** the target range by **more than 25 basis points**.
+- "Hike 25bps" if the FOMC **hikes** (raises) the target range by **exactly 25 basis points (0.25%)**.
+- "Hike >25bps" if the FOMC **hikes** the target range by **more than 25 basis points**.
 
-Created in 2005 under President George W. Bush, PMI has been credited with saving approximately 940,000 lives in the 2005-2017 time period, mainly in Subsaharan Africa and the Greater Mekong Subregion of Southeast Asia.
+Contingency: If the Federal Reserve cancels the target meeting, then "Fed maintains rate" is the winning outcome and all other outcomes are not.""",
+            fine_print = """Mutual exclusivity: only one outcome/bucket can be the winner.
 
-On January 20, 2025, newly-inaugurated President Trump signed Executive Order 14169 Reevaluating and Realigning United States Foreign Aid, which targeted in particular USAID, which operates the PMI program.
-
-According to the Kaiser Family Foundation: Despite the emergency humanitarian waiver specifying life-saving medicine and medical services, it was still unclear what programs it actually applied to and whether it included services provided by PEPFAR, the President's Malaria Initiative, and other health programs. As a result, the PEPFAR program applied for a specific waiver, which was granted on February 1, for certain activities. No other waivers have been announced for any other U.S. global health program, such as for the President's Malaria Initiative (PMI).
-
-As of February 23, 2025, USAID was beginning a round of mass layoffs of thousands of staffers, leaving the future of programs such as PMI in doubt.""",
-            resolution_criteria="""This question resolves as **Yes** if the United States President's Malaria Initiative (PMI) ceases to exist before January 1, 2026. This can come about through any of the following mechanisms:
-
-* the initiative being terminated.
-* the initiative and/or its functions merging with or being consolidated into another program or agency, with PMI no longer continuing to operate as a distinct organization.
-* the program having its public funding eliminated by Congress.""",
-            fine_print="""* Because PMI was created by law, an enacted law that satisfies one of the above requirements would resolve the question as **Yes** immediately. In the event a presidential action would satisfy the above, the question will resolve as **Yes** if the action has taken effect for 60 consecutive days without being stayed, blocked, or otherwise halted by a federal court. In the event a presidential action is temporarily blocked by a court but later goes into effect for 60 days the question will resolve as **Yes**. The 60 day period must complete before January 1, 2026.
-* Partial termination or partial elimination of funding is not sufficient.
-* PMI being renamed will not count, as long as the core mission of funding global control of malaria remains intact within the same program.""",
-            publish_time=datetime.now(),
-            close_time=datetime(2025, 11, 23, 18, 35, 58),  # Actual close time from Metaculus
-            resolve_time=datetime(2026, 1, 1)  # Resolution deadline
+Trading/expiration mechanics per FEDDECISION: Last Trading Time is 1:55 PM ET on the market’s specified Last Trading Date. Expiration Time is 2:05 PM ET, and Expiration Date is the sooner of (i) the first 2:05 PM ET following the release of a decision for <meeting> or (ii) three months after <date> (as defined by the iteration). The Expiration Value is the value of the Underlying as documented by the Federal Reserve System at Expiration time.""",
         )
         
         async def run_local():
@@ -546,10 +668,22 @@ As of February 23, 2025, USAID was beginning a round of mass layoffs of thousand
                 print("\n\n[LOCAL TEST] Research Completed:\n", research[:500], "...\n")
                 
                 # 2. Forecast
-                prediction = await bot._run_forecast_on_binary(question, research)
+                prediction, metadata = await bot._run_forecast_on_multiple_choice(question, research)
                 print("\n\n[LOCAL TEST] Prediction Generated:")
-                print(f"Probability: {prediction.prediction_value:.2%}")
+                print(f"Prediction: {prediction.prediction_value}")
                 print("Reasoning:", prediction.reasoning[:200], "...")
+
+                # generate report
+                report = await bot._generate_report(
+                    question=question,
+                    research_context=research,
+                    researcher_outputs=metadata["community_results"],
+                    consensus_output=metadata["consensus_result"],
+                    supervisor_critique="",
+                    current_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+                print("\n\n[LOCAL TEST] Report Generated:")
+                print(report[:500], "...")
             finally:
                 await bot._remove_notepad(question)
             

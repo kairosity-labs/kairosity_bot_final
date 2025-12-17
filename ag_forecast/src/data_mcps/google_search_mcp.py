@@ -15,11 +15,16 @@ class GoogleSearchMCP(BaseDataMCP):
     def __init__(self, **kwargs):
         super().__init__(None, **kwargs)
 
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+    async def search(self, query: str) -> List[Dict[str, Any]]:
+        if not query:
+            return []
+            
         query = query.replace('"', '').replace("'", '').strip()
-        is_news = kwargs.get('is_news', False)
-        date_before = kwargs.get('date_before')
-        max_results = kwargs.get('max_results', 20)
+        
+        # Hardcoded defaults found to be robust
+        is_news = False  # Default to general web search
+        date_before = None # No historical filter by default
+        max_results = 10   # Standard results count
         
         # Retry logic with exponential backoff for robustness
         max_retries = 3

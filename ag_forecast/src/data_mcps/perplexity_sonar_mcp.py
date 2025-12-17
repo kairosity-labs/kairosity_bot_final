@@ -11,17 +11,15 @@ class PerplexitySonarMCP(BaseDataMCP):
     
     Uses chat completions API with 'sonar' model for cost-effective grounded responses.
     Best for: Quick answers, summaries, synthesized insights.
-    
-    Kwargs for search():
-        - temperature (float): 0-2, default 0.2
-        - max_tokens (int): Max response tokens
-        - top_p (float): Nucleus sampling, 0-1
-        - return_citations (bool): Include source citations
-        - return_images (bool): Include images if available
-        - return_related_questions (bool): Include related questions
     """
-    # Class-level semaphore to limit concurrent requests
-    _semaphore = asyncio.Semaphore(3)
+    # Semaphore - lazily initialized to avoid event loop issues with nest_asyncio
+    _semaphore_instance = None
+    
+    @property
+    def _semaphore(self):
+        if PerplexitySonarMCP._semaphore_instance is None:
+            PerplexitySonarMCP._semaphore_instance = asyncio.Semaphore(3)
+        return PerplexitySonarMCP._semaphore_instance
     
     def __init__(self, api_key: str = None, model: str = "sonar", max_retries: int = 3, **kwargs):
         super().__init__(api_key, **kwargs)
@@ -30,11 +28,19 @@ class PerplexitySonarMCP(BaseDataMCP):
         self.base_url = "https://api.perplexity.ai/chat/completions"
         self.max_retries = max_retries
 
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+    async def search(self, query: str) -> List[Dict[str, Any]]:
         """
-        Perplexity search via direct API.
-        Returns content with citations if available.
+        Perplexity Sonar - AI-synthesized answers with citations.
+        
+        Args:
+            query (str): Natural language question
+            
+        Returns:
+            List with single dict containing AI-synthesized content and citations
         """
+        if not query:
+            return []
+            
         from datetime import datetime
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
@@ -47,13 +53,17 @@ class PerplexitySonarMCP(BaseDataMCP):
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                     }
+                    
+                    # Optimal defaults for forecasting research
                     payload = {
                         "model": self.model,
                         "messages": [
                             {"role": "system", "content": f"You are a helpful research assistant. Be precise and concise. Current date: {current_date}"},
                             {"role": "user", "content": query}
                         ],
-                        **kwargs
+                        "temperature": 0.2,  # Low temperature for factual accuracy
+                        "return_citations": True,  # Always include sources
+                        "return_related_questions": True  # Useful for context expansion
                     }
                     
                     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -86,6 +96,8 @@ class PerplexitySonarMCP(BaseDataMCP):
                             citations = message["citations"]
                         
                         return [{
+                            "title": "Perplexity Sonar Response",
+                            "url": "",
                             "content": content,
                             "citations": citations,
                             "source": "perplexity_sonar"

@@ -12,6 +12,7 @@ from ag_forecast.src.prompts import (
     PERPLEXITY_SONAR_OPTIMIZATION_PROMPT,
     ASKNEWS_OPTIMIZATION_PROMPT,
     DUCKDUCKGO_OPTIMIZATION_PROMPT,
+    PARALLEL_OPTIMIZATION_PROMPT,
 )
 
 
@@ -23,28 +24,10 @@ class SearchQuery(BaseModel):
 
 
 class OptimizedSearchQuery(BaseModel):
-    """Optimized query with source-specific kwargs"""
-    
-    query: str = Field(description="Optimized query string for the target source")
-    kwargs: Dict[str, Union[str, int, float, bool, list, None]] = Field(
-        default_factory=dict, 
-        description="Source-specific parameters (values can be string, int, float, bool, list, or null)"
-    )
+    """Optimized query with source-specific details"""
+    query: str = Field(description="The optimized search query string")
     reasoning: str = Field(description="Explanation of optimizations applied")
-    
-    @classmethod
-    def model_json_schema(cls, **kwargs):
-        """Override to set additionalProperties: false for kwargs field"""
-        schema = super().model_json_schema(**kwargs)
-        # Force additionalProperties to false instead of defining types
-        if 'properties' in schema and 'kwargs' in schema['properties']:
-            schema['properties']['kwargs'] = {
-                'type': 'object',
-                'description': 'Source-specific parameters',
-                'additionalProperties': False,
-                'default': {}
-            }
-        return schema
+    original_index: int = Field(description="Index of the original SearchQuery that generated this optimized query")
 
 
 class MultiOptimizedQueries(BaseModel):
@@ -57,24 +40,13 @@ class MultiOptimizedQueries(BaseModel):
         description="Whether to expand into multiple queries for better coverage"
     )
     
+    @field_validator('queries', mode='before')
     @classmethod
-    def model_json_schema(cls, **kwargs):
-        """Override to ensure nested schemas also have additionalProperties: false"""
-        schema = super().model_json_schema(**kwargs)
-        
-        # Fix the nested OptimizedSearchQuery schema if it exists in $defs
-        if '$defs' in schema and 'OptimizedSearchQuery' in schema['$defs']:
-            osq_schema = schema['$defs']['OptimizedSearchQuery']
-            if 'properties' in osq_schema and 'kwargs' in osq_schema['properties']:
-                osq_schema['properties']['kwargs'] = {
-                    'type': 'object',
-                    'description': 'Source-specific parameters',
-                    'additionalProperties': False,
-                    'default': {}
-                }
-        
-        return schema
-
+    def ensure_queries_not_none(cls, v):
+        """Ensure queries is never None, use empty list as fallback"""
+        if v is None:
+            raise ValueError("queries cannot be None, must be a list of OptimizedSearchQuery")
+        return v
 
 
 class QueryOptimizer:
@@ -97,9 +69,11 @@ class QueryOptimizer:
         "perplexity_sonar": PERPLEXITY_SONAR_OPTIMIZATION_PROMPT,
         "asknews": ASKNEWS_OPTIMIZATION_PROMPT,
         "duckduckgo": DUCKDUCKGO_OPTIMIZATION_PROMPT,
+        "parallel": PARALLEL_OPTIMIZATION_PROMPT,
     }
     
-    def __init__(self, backend: BaseBackend, logger=None):
+    def __init__(self, backend: BaseBackend, max_tokens: int = 16384, logger=None):
+        self.max_tokens = max_tokens
         self.backend = backend
         self.logger = logger
     
@@ -125,13 +99,13 @@ class QueryOptimizer:
         
         # Process all queries in parallel with multi-query expansion support
         optimization_tasks = [
-            self._optimize_single_query(sq, user_query, current_date)
-            for sq in search_queries
+            self._optimize_single_query(sq, user_query, current_date, i)
+            for i, sq in enumerate(search_queries)
         ]
         
         results = await asyncio.gather(*optimization_tasks, return_exceptions=True)
         
-        # Flatten results (since each optimization can return 1-3 queries)
+        # Flatten results
         optimized_queries = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -139,14 +113,19 @@ class QueryOptimizer:
                     self.logger.error(f"Optimization failed for query {i+1}: {type(result).__name__}")
                     self.logger.error(f"Exception details: {str(result)}")
                     self.logger.error(f"Traceback: {''.join(traceback.format_exception(type(result), result, result.__traceback__))}")
-                # Fallback: use original query with empty kwargs
+                # Fallback: use original query
                 optimized_queries.append(OptimizedSearchQuery(
                     query=search_queries[i].query,
-                    kwargs={},
-                    reasoning="Optimization failed, using original query"
+                    reasoning="Optimization failed, using original query",
+                    original_index=i
                 ))
             else:
                 # Result is a MultiOptimizedQueries object
+                for oq in result.queries:
+                    # Validate query is not empty
+                    if not oq.query or not oq.query.strip():
+                        oq.query = search_queries[i].query
+                
                 optimized_queries.extend(result.queries)
                 if self.logger and result.should_expand and len(result.queries) > 1:
                     self.logger.info(f"  ↳ Expanded into {len(result.queries)} complementary queries")
@@ -160,7 +139,8 @@ class QueryOptimizer:
         self, 
         search_query: SearchQuery, 
         user_query: str, 
-        current_date: str
+        current_date: str,
+        original_index: int
     ) -> MultiOptimizedQueries:
         """
         Optimize a single search query for its target source.
@@ -176,8 +156,8 @@ class QueryOptimizer:
             return MultiOptimizedQueries(
                 queries=[OptimizedSearchQuery(
                     query=search_query.query,
-                    kwargs={},
-                    reasoning=f"No optimization available for {source}"
+                    reasoning=f"No optimization available for {source}",
+                    original_index=original_index
                 )],
                 should_expand=False
             )
@@ -209,15 +189,16 @@ class QueryOptimizer:
             multi_queries = await self.backend.generate_structured(
                 messages, 
                 MultiOptimizedQueries,
-                max_tokens=2048
+                max_tokens=self.max_tokens
             )
+            
+            for oq in multi_queries.queries:
+                oq.original_index = original_index
             
             if self.logger:
                 for i, oq in enumerate(multi_queries.queries):
                     prefix = f"  [{i+1}]" if len(multi_queries.queries) > 1 else "  ✓"
                     self.logger.info(f"{prefix} '{search_query.query}' → '{oq.query}'")
-                    if oq.kwargs:
-                        self.logger.info(f"      kwargs: {oq.kwargs}")
             
             return multi_queries
             
@@ -228,8 +209,8 @@ class QueryOptimizer:
             return MultiOptimizedQueries(
                 queries=[OptimizedSearchQuery(
                     query=search_query.query,
-                    kwargs={},
-                    reasoning=f"Optimization failed: {str(e)}"
+                    reasoning=f"Optimization failed: {str(e)}",
+                    original_index=original_index
                 )],
                 should_expand=False
             )

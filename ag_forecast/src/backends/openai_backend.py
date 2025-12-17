@@ -33,7 +33,14 @@ class OpenAIBackend(BaseBackend):
             response_format=response_model,
             **kwargs
         )
-        return response.choices[0].message.parsed
+        parsed = response.choices[0].message.parsed
+        if parsed is None:
+            # Check if there was a refusal
+            refusal = response.choices[0].message.refusal
+            if refusal:
+                raise ValueError(f"Model refused to respond: {refusal}")
+            raise ValueError(f"Failed to parse response into {response_model.__name__}. Raw content: {response.choices[0].message.content}")
+        return parsed
 
     async def tool_call(self, messages: List[Dict[str, str]], tools: List[Dict[str, Any]], **kwargs) -> Union[str, Dict[str, Any]]:
         # Set default max_tokens if not provided

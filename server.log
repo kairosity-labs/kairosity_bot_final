@@ -1,0 +1,9 @@
+Warning: Model openrouter/perplexity/sonar does not support cost tracking.
+2025-12-17 11:30:07.824 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [3548466]
+INFO:     Waiting for application startup.
+WARNING:forecasting_tools.ai_models.model_tracker:Warning: Model openrouter/openai/gpt-4o-mini does not support cost tracking.
+WARNING:forecasting_tools.forecast_bots.forecast_bot:User forgot to set an llm for purpose: 'summarizer'. Using default llm: 'openrouter/openai/gpt-4o-mini'. You can configure defaults by overriding _llm_config_defaults
+WARNING:forecasting_tools.forecast_bots.forecast_bot:User forgot to set an llm for purpose: 'researcher'. Using default llm: 'asknews/news-summaries'. You can configure defaults by overriding _llm_config_defaults
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)

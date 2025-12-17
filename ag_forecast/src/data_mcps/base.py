@@ -9,13 +9,12 @@ class BaseDataMCP(ABC):
         self.config = kwargs
 
     @abstractmethod
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+    async def search(self, query: str) -> List[Dict[str, Any]]:
         """
         Perform a search query.
         
         Args:
             query: The search query string.
-            **kwargs: Additional parameters (limit, etc.).
             
         Returns:
             A list of search results (dictionaries).

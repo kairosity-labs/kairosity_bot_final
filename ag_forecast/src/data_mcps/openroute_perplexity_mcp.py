@@ -14,7 +14,7 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
 
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+    async def search(self, query: str) -> List[Dict[str, Any]]:
         """
         Perplexity search via OpenRouter.
         Returns content with citations if available.
@@ -28,13 +28,17 @@ class OpenRouterPerplexityMCP(BaseDataMCP):
             "HTTP-Referer": "https://github.com/metaculus-bot",
             "X-Title": "Metaculus Bot"
         }
+        
+        # Hardcoded robust defaults
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": f"You are a helpful research assistant. Be precise and concise. Current date: {current_date}"},
                 {"role": "user", "content": query}
             ],
-            **kwargs
+            # Default parameters usually accepted by Perplexity Sonar
+            "temperature": 0.1,
+            "max_tokens": 1024
         }
         
         async with httpx.AsyncClient(timeout=30.0) as client:

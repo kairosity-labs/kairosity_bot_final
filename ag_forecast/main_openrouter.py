@@ -5,6 +5,7 @@ from ag_forecast.src.backends.openrouter_backend import OpenRouterBackend
 from ag_forecast.src.data_mcps.asknews_mcp import AskNewsMCP
 from ag_forecast.src.data_mcps.openroute_perplexity_mcp import OpenRouterPerplexityMCP
 from ag_forecast.src.data_mcps.openrouter_gpt4o_mcp import OpenRouterGPT4OMCP
+from ag_forecast.src.data_mcps.parallel_mcp import ParallelMCP
 from ag_forecast.src.workflows.agentic_retrieval import AgenticRetrieval
 from ag_forecast.src.workflows.researcher_agent import ResearcherAgent
 from ag_forecast.src.workflows.analyst_agent import AnalystAgent
@@ -30,6 +31,7 @@ async def main():
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
     asknews_client_id = os.getenv("ASKNEWS_CLIENT_ID")
     asknews_secret = os.getenv("ASKNEWS_SECRET")
+    parallel_api_key = os.getenv("PARALLEL_API_KEY")
     
     if not openrouter_api_key:
         logger.error("OPENROUTER_API_KEY not found in environment variables")
@@ -53,6 +55,13 @@ async def main():
         logger.info("AskNews MCP enabled for agentic retrieval.")
     else:
         logger.info("ASKNEWS_CLIENT_ID or ASKNEWS_SECRET not found. AskNews will be disabled.")
+    
+    if parallel_api_key:
+        data_mcps["parallel"] = ParallelMCP(api_key=parallel_api_key)
+        logger.info("Parallel.ai Unified MCP enabled for agentic retrieval.")
+    else:
+        logger.info("PARALLEL_API_KEY not found. Parallel.ai MCPs will be disabled.")
+    
     logger.info(f"Data MCPs: {list(data_mcps.keys())}")
     
     # Initialize Components

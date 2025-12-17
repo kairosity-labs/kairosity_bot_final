@@ -17,7 +17,8 @@ class SupervisorOutput(BaseModel):
     sub_queries: List[SubQuery]
 
 class SupervisorAgent:
-    def __init__(self, backend: BaseBackend, logger=None):
+    def __init__(self, backend: BaseBackend, max_tokens: int = 16384, logger=None):
+        self.max_tokens = max_tokens
         self.backend = backend
         self.logger = logger
 
@@ -38,7 +39,7 @@ class SupervisorAgent:
         ]
 
         # Generate Critique and Plan
-        output = await self.backend.generate_structured(messages, SupervisorOutput)
+        output = await self.backend.generate_structured(messages, SupervisorOutput, max_tokens=self.max_tokens)
         
         if self.logger:
             self.logger.info(f"Critique: {output.critique}")
